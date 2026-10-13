@@ -5,6 +5,7 @@ import remarkGfm from 'remark-gfm';
 import type { AttachedFile, ChatMessage, Conversation, ModelInfo, Provider, SearchMode } from '../types';
 import { FluxMark, ProviderIcon } from './Brand';
 import ModelPicker from './ModelPicker';
+import { normalizeMarkdown } from '../lib/normalize-markdown';
 
 interface Props {
   conversation: Conversation;
@@ -50,11 +51,13 @@ function CodeBlock({ node, onOpenSnippet, onNotify }: { node: unknown; onOpenSni
 }
 
 function MessageBody({ message, onOpenSnippet, onNotify }: { message: ChatMessage; onOpenSnippet: Props['onOpenSnippet']; onNotify: Props['onNotify'] }) {
+  const content = normalizeMarkdown(message.content);
   return <div className="markdown-body"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{
     pre: ({ node }) => <CodeBlock node={node} onOpenSnippet={onOpenSnippet} onNotify={onNotify} />,
     code: ({ children, className }) => <code className={className || 'inline-code'}>{children}</code>,
     a: ({ children, href }) => <a href={href} target="_blank" rel="noopener noreferrer">{children}<ArrowUpRight size={12} /></a>,
-  }}>{message.content}</ReactMarkdown></div>;
+    br: () => <br />,
+  }}>{content}</ReactMarkdown></div>;
 }
 
 function ToolCallBadges({ message }: { message: ChatMessage }) {

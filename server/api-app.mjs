@@ -153,6 +153,7 @@ app.post('/api/chat', rateLimit, async (req, res) => {
     startStream(res, input.model);
     let usedModel = input.model;
     let hasText = false;
+    let rawText = '';
     const chunks = format === 'ollama' ? readLines(upstream.body) : readSSE(upstream.body);
     for await (const data of chunks) {
       if (controller.signal.aborted) break;
@@ -170,14 +171,23 @@ app.post('/api/chat', rateLimit, async (req, res) => {
         sendEvent(res, { type: 'model', model: usedModel });
       }
       if (part.text) {
+        rawText += part.text;
         hasText = true;
         sendEvent(res, { type: 'delta', text: part.text });
       }
       if (part.done) break;
     }
     if (!controller.signal.aborted) {
-      if (!hasText) sendEvent(res, { type: 'error', message: 'The model returned no text. Try another model or rephrase your request.' });
-      else sendEvent(res, { type: 'done', model: usedModel });
+      // Some providers stream whitespace-only chunks or emit only tool-call XML
+      // from the client-side tool system. Treat non-empty raw text that strips
+      // to nothing after whitespace/tool removal as a valid (empty-prose) turn
+      // rather than a hard error — the client will surface tool activity.
+      const stripped = rawText.replace(/<af-tool\b[^>]*>[\s\S]*?<\/af-tool>/g, '').trim();
+      if (!hasText || (!stripped && rawText.trim().length === 0)) {
+        sendEvent(res, { type: 'error', message: 'The model returned no text. Try another model or rephrase your request.' });
+      } else {
+        sendEvent(res, { type: 'done', model: usedModel });
+      }
     }
     res.end();
   } catch (error) {
