@@ -3,7 +3,7 @@ import express from 'express';
 import { isNonChatModelId } from '../src/lib/model-policy.mjs';
 import { timingSafeEqual } from 'node:crypto';
 import {
-  RequestError, SYSTEM_PROMPT, validateChat, buildRequest, friendlyUpstreamError,
+  RequestError, validateChat, buildRequest, friendlyUpstreamError,
   readSSE, readLines, extractChunk, getFreeOpenRouterModels,
 } from './providers.mjs';
 import { planWebSearch, searchWeb, withSearchContext } from './search.mjs';
@@ -139,10 +139,9 @@ app.post('/api/chat', rateLimit, async (req, res) => {
         sendEvent(res, { type: 'sources', query, sources });
         ({ url, options, format } = buildRequest(withSearchContext(input, query, sources), key, ollamaBaseUrl));
       } else {
+        // The already-built answer request has the full AIFLUX profile plus
+        // a mode-specific warning that no live search was performed.
         sendEvent(res, { type: 'search', phase: 'skipped' });
-        if (input.searchMode === 'always') {
-          ({ url, options, format } = buildRequest({ ...input, systemPrompt: `${SYSTEM_PROMPT}\n\nThe user requested live web search, but no safe query could be formed. No live search was performed. Do not imply that current information was verified.` }, key, ollamaBaseUrl));
-        }
       }
     }
     const upstream = await fetch(url, { ...options, signal: controller.signal });

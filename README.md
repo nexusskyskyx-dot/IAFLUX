@@ -45,6 +45,12 @@ Search uses [Tavily](https://docs.tavily.com/documentation/keyless). Rate-limite
 
 **Privacy:** The AI planner sees the latest question (appended code-file attachments are stripped for planning), and only a bounded query—not the whole conversation—is sent to Tavily. The selected AI receives the search snippets and your original chat context to write the answer. We reject common secret patterns in search queries, but cannot guarantee that arbitrary private information in your question will be caught. **Don't enable search for sensitive prompts.** Tavily results are treated as untrusted data, not instructions. Search mode is remembered locally; the optional Tavily key follows the same session-storage / “Remember on this device” setting as AI keys.
 
+## AIFLUX assistant identity
+
+Every chat request sends a **server-owned system instruction** to the selected model, including follow-up turns. It tells the model it is **AIFLUX**, not the underlying provider, and describes the workspace's actual features and limitations: chat/code, Canvas, sandbox preview, attachments, live search, models, and local exports. Web-search guidance reflects **this request's** Off/Auto/Always state and only says a search happened when the server supplied results. The internal search planner also identifies as AIFLUX, but does not answer the user. No one needs to paste an identity prompt into each model's Settings.
+
+**When shipping a new feature:** update `AIFLUX_FEATURES` and any relevant behavior/limitations in `server/assistant-profile.mjs` alongside the UI/API and this README. The server builds the prompt from that one profile on every answer, including sourced and skipped-search replies. Run `npm test`—the profile tests check that its entries reach every provider. Do not advertise features before they are available or claim the assistant can run commands, directly inspect Canvas edits, or deploy code.
+
 ## What you can do
 
 - **Chat and code** with streamed answers, Markdown, optional live web search with source links, code blocks, model switching, copy actions, and a persistent local conversation history.
@@ -88,13 +94,14 @@ api/*.js             Vercel serverless entrypoints for the same API
 server/api-app.mjs   Shared Express API routes
 server/index.mjs     Local Node server + Vite dev middleware / production assets
 server/providers.mjs provider adapters, validation, free-model discovery, SSE parsing
+server/assistant-profile.mjs  AIFLUX identity, shipped capability list, per-request search guidance
 server/search.mjs    AI search planning, Tavily requests, source normalization
 vercel.json          Vite build and SPA routing configuration
 ```
 
 ## Verified locally
 
-`npm test` covers the Vercel function entrypoints, provider request validation, free-only OpenRouter routing, rejection of random/safety/utility models, Gemini/Groq/Ollama request formats, AI tool planning, Tavily keyless/keyed calls and source sanitization, search/answer streaming, SSE parsing, error redaction, code-file extraction, and preview sandbox generation. External AI and Tavily requests are **mocked** in these tests; a real end-to-end search requires a working AI connection and Tavily availability. `npm run build` checks the TypeScript app and builds the production bundle.
+`npm test` covers the Vercel function entrypoints, provider request validation, free-only OpenRouter routing, rejection of random/safety/utility models, Gemini/Groq/Ollama request formats, the AIFLUX identity/capability profile on every provider and search path, AI tool planning, Tavily keyless/keyed calls and source sanitization, search/answer streaming, SSE parsing, error redaction, code-file extraction, and preview sandbox generation. External AI and Tavily requests are **mocked** in these tests; a real end-to-end search requires a working AI connection and Tavily availability. `npm run build` checks the TypeScript app and builds the production bundle.
 
 ---
 

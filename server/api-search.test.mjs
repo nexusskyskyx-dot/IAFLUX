@@ -53,13 +53,17 @@ test('search off goes straight to the selected provider with no search calls', a
   });
   assert.equal(calls.length, 1);
   assert.match(calls[0].url, /:streamGenerateContent\?alt=sse/);
-  assert.equal(JSON.parse(calls[0].options.body).contents[0].parts[0].text, 'What is the current React release?');
+  const answer = JSON.parse(calls[0].options.body);
+  assert.equal(answer.contents[0].parts[0].text, 'What is the current React release?');
+  assert.match(answer.systemInstruction.parts[0].text, /You are AIFLUX/);
+  assert.match(answer.systemInstruction.parts[0].text, /Web mode: off.*No live search was performed/);
+  assert.match(answer.systemInstruction.parts[0].text, /Canvas turns named fenced code blocks into files/);
 });
 
 test('auto mode lets the model skip unnecessary search and clearly reports it', async () => {
   const calls = [];
-  await withServer(async (url) => {
-    calls.push(url);
+  await withServer(async (url, options) => {
+    calls.push({ url, options });
     return url.endsWith(':generateContent')
       ? json({ candidates: [{ content: { parts: [{ text: 'NO_SEARCH' }] } }] })
       : stream('Here is the code.');
@@ -71,7 +75,11 @@ test('auto mode lets the model skip unnecessary search and clearly reports it', 
     assert.deepEqual(events.filter(({ type }) => type === 'search').map(({ phase }) => phase), ['planning', 'skipped']);
   });
   assert.equal(calls.length, 2);
-  assert.ok(calls.every((url) => url.includes('generativelanguage.googleapis.com')));
+  assert.ok(calls.every(({ url }) => url.includes('generativelanguage.googleapis.com')));
+  const answerPrompt = JSON.parse(calls[1].options.body).systemInstruction.parts[0].text;
+  assert.match(answerPrompt, /You are AIFLUX/);
+  assert.match(answerPrompt, /Web mode: auto.*no live search was performed/i);
+  assert.doesNotMatch(answerPrompt, /The server ran a live web search/);
 });
 
 test('always mode calls Tavily keyless, passes attributed sources to the AI, and streams source links', async () => {
@@ -97,6 +105,9 @@ test('always mode calls Tavily keyless, passes attributed sources to the AI, and
   assert.equal(calls[1].options.headers.Authorization, undefined);
   assert.equal(JSON.parse(calls[1].options.body).query, 'React stable release 2026');
   const answer = JSON.parse(calls[2].options.body);
+  assert.match(answer.systemInstruction.parts[0].text, /You are AIFLUX/);
+  assert.match(answer.systemInstruction.parts[0].text, /Canvas turns named fenced code blocks into files/);
+  assert.match(answer.systemInstruction.parts[0].text, /The server ran a live web search/);
   assert.match(answer.systemInstruction.parts[0].text, /untrusted third-party data/);
   assert.match(answer.contents.at(-1).parts[0].text, /https:\/\/react.dev\/blog\/latest/);
   assert.match(answer.contents.at(-1).parts[0].text, /Release details/);
@@ -142,6 +153,27 @@ test('Groq falls back to a safe query when a model does not support function too
   assert.equal(calls[0].url, 'https://api.groq.com/openai/v1/chat/completions');
   assert.equal(calls[1].url, 'https://api.tavily.com/search');
   assert.equal(JSON.parse(calls[2].options.body).stream, true);
+});
+
+test('always mode keeps AIFLUX identity and acknowledges when no safe search was possible', async () => {
+  const calls = [];
+  await withServer(async (url, options) => {
+    calls.push({ url, options });
+    return url.endsWith(':generateContent')
+      ? json({ error: 'Tools not supported' }, 400)
+      : stream('I cannot verify current details without a safe search query.');
+  }, async (post) => {
+    const result = await post(body('always', 'Find latest password=private123'));
+    assert.equal(result.status, 200);
+    const events = parseEvents(await result.text());
+    assert.deepEqual(events.map(({ type }) => type), ['start', 'search', 'search', 'delta', 'done']);
+    assert.equal(events[2].phase, 'skipped');
+  });
+  assert.equal(calls.length, 2);
+  const prompt = JSON.parse(calls[1].options.body).systemInstruction.parts[0].text;
+  assert.match(prompt, /You are AIFLUX/);
+  assert.match(prompt, /Web mode: always.*no safe search was performed/i);
+  assert.doesNotMatch(prompt, /The server ran a live web search/);
 });
 
 test('best-effort per-IP limit caps attempts to use web search', async () => {

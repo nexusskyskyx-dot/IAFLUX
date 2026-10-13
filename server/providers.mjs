@@ -1,7 +1,10 @@
 import catalog from '../src/data/models.json' with { type: 'json' };
 import { isNonChatModelId, isSelectableOpenRouterId, isUsableFreeCatalogModel } from '../src/lib/model-policy.mjs';
+import { buildAssistantPrompt } from './assistant-profile.mjs';
 
-export const SYSTEM_PROMPT = `You are AIFLUX, a thoughtful, highly skilled coding partner. Help the user turn ideas into working software. Be direct, accurate, and encouraging. Ask for clarification only when a missing detail genuinely blocks progress; otherwise make sensible assumptions and say what they are. When asked to build something, provide complete, usable code rather than vague pseudocode. Put each file in its own fenced code block with a language and filename, for example: \`\`\`html filename="index.html". Explain how to run it when useful. If you are uncertain, say so. Never claim to have run, tested, or deployed code unless you actually have.`;
+// Keep this default export for callers that display the base guidance. Requests
+// use buildAssistantPrompt per turn so their features and Web state stay current.
+export const SYSTEM_PROMPT = buildAssistantPrompt();
 
 export const PROVIDER_URLS = Object.freeze({
   openrouter: 'https://openrouter.ai/api/v1/chat/completions',
@@ -62,7 +65,8 @@ export function validateChat(body, ollamaConfigured = false) {
   return { provider, model, messages: cleanMessages, searchMode };
 }
 
-export function buildRequest({ provider, model, messages, systemPrompt = SYSTEM_PROMPT }, key, ollamaBaseUrl) {
+export function buildRequest({ provider, model, messages, searchMode = 'off', searchPerformed = false, systemPrompt }, key, ollamaBaseUrl) {
+  const prompt = systemPrompt || buildAssistantPrompt({ provider, model, searchMode, searchPerformed });
   if (provider !== 'ollama' && !key) {
     throw new RequestError(401, `Connect your ${providerName(provider)} API key in Settings to continue.`);
   }
@@ -74,7 +78,7 @@ export function buildRequest({ provider, model, messages, systemPrompt = SYSTEM_
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
         body: JSON.stringify({
-          systemInstruction: { parts: [{ text: systemPrompt }] },
+          systemInstruction: { parts: [{ text: prompt }] },
           contents: messages.map(({ role, content }) => ({
             role: role === 'assistant' ? 'model' : 'user',
             parts: [{ text: content }],
@@ -92,7 +96,7 @@ export function buildRequest({ provider, model, messages, systemPrompt = SYSTEM_
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model,
-          messages: [{ role: 'system', content: systemPrompt }, ...messages],
+          messages: [{ role: 'system', content: prompt }, ...messages],
           stream: true,
         }),
       },
@@ -110,7 +114,7 @@ export function buildRequest({ provider, model, messages, systemPrompt = SYSTEM_
       },
       body: JSON.stringify({
         model,
-        messages: [{ role: 'system', content: systemPrompt }, ...messages],
+        messages: [{ role: 'system', content: prompt }, ...messages],
         stream: true,
       }),
     },
