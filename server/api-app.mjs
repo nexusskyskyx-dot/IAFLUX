@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
+import { isNonChatModelId } from '../src/lib/model-policy.mjs';
 import { timingSafeEqual } from 'node:crypto';
 import {
   RequestError, validateChat, buildRequest, friendlyUpstreamError,
@@ -55,7 +56,7 @@ app.get('/api/models', async (_req, res) => {
       const response = await fetch(`${ollamaBaseUrl.replace(/\/+$/, '')}/api/tags`, { signal: AbortSignal.timeout(3000) });
       if (response.ok) {
         const data = await response.json();
-        ollamaModels = (data.models || []).filter((model) => typeof model.name === 'string').slice(0, 80).map((model) => ({
+        ollamaModels = (data.models || []).filter((model) => typeof model.name === 'string' && !isNonChatModelId(model.name)).slice(0, 80).map((model) => ({
           id: model.name, provider: 'ollama', name: model.name,
           shortName: model.name, description: 'Runs privately on your Ollama server.',
           strength: 'Local & private', badge: 'LOCAL',
@@ -130,6 +131,10 @@ app.post('/api/chat', rateLimit, async (req, res) => {
       if (part.error) {
         const safeMessage = key ? String(part.error).replaceAll(key, '[redacted]') : String(part.error);
         throw new RequestError(502, safeMessage.slice(0, 320));
+      }
+      if (input.provider === 'openrouter' && part.model &&
+          (part.model === 'openrouter/free' || isNonChatModelId(part.model))) {
+        throw new RequestError(502, 'OpenRouter returned a safety or utility model instead of a coding assistant. Choose another free model.');
       }
       if (part.model && part.model !== usedModel) {
         usedModel = part.model;

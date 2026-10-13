@@ -26,14 +26,16 @@ npm test          # provider and workspace tests
 
 | Provider | Included choices | How to connect |
 | --- | --- | --- |
-| **OpenRouter** | Free model router (`openrouter/free`) plus **live-discovered `:free` models**, with coding-focused models surfaced first | Create a free API key at [OpenRouter](https://openrouter.ai/keys); add it in Settings or use `OPENROUTER_API_KEY`. |
-| **Google Gemini** | Gemini 2.5 Flash and Flash-Lite | Create a key in [Google AI Studio](https://aistudio.google.com/apikey); add it in Settings or use `GEMINI_API_KEY`. |
+| **OpenRouter** | **Poolside Laguna S 2.1** (coding specialist), **Cohere North Mini Code** (fast coding), Laguna XS, Inkling, Nemotron 3 Ultra, and live-discovered `:free` chat models | Create a free API key at [OpenRouter](https://openrouter.ai/keys); add it in Settings or use `OPENROUTER_API_KEY`. |
+| **Google Gemini** | **Gemini 3.8 Flash** (overall recommendation for software engineering), 2.5 Flash, 2.5 Flash-Lite | Create a key in [Google AI Studio](https://aistudio.google.com/apikey); add it in Settings or use `GEMINI_API_KEY`. |
 | **Groq** | GPT-OSS 120B, Qwen 3.8 27B, GPT-OSS 20B | Create a key in [GroqCloud](https://console.groq.com/keys); add it in Settings or use `GROQ_API_KEY`. |
-| **Ollama** | Your installed local models, discovered from `/api/tags` | Run [Ollama](https://github.com/ollama/ollama) on the **same host as the AIFLUX server**, set `OLLAMA_BASE_URL=http://127.0.0.1:11434`, pull a model, and refresh the model library. No cloud API key required. |
+| **Ollama** | Your installed local conversational models, discovered from `/api/tags` | Run [Ollama](https://github.com/ollama/ollama) on the **same host as the AIFLUX server**, set `OLLAMA_BASE_URL=http://127.0.0.1:11434`, pull a model, and refresh the model library. No cloud API key required. |
 
-OpenRouter's free router chooses an available free model, while specific free variants use the `:free` suffix. The live catalog may be unreachable in restricted environments; the free router remains selectable as a fallback. [2](https://openrouter.ai/docs/guides/routing/routers/free-router) Google lists free API tiers for Gemini 2.5 Flash and Flash-Lite. [1](https://ai.google.dev/gemini-api/docs/pricing) Groq lists supported model IDs and account-specific rate limits in its documentation. [1](https://console.groq.com/docs/models) [1](https://console.groq.com/docs/rate-limits)
+**Why no “Auto free”?** OpenRouter's [`openrouter/free` router](https://openrouter.ai/docs/guides/routing/routers/free-router) picks a random free model; its catalog also includes [content-safety classifiers](https://openrouter.ai/nvidia/nemotron-3.5-content-safety:free) that answer with labels such as “User Safety: safe” instead of code. AIFLUX now rejects the random router and recognizable non-chat model IDs, filters moderation/embedding/reranking endpoints out of live discovery using model metadata, and stops a stream if the provider reports a safety/utility model. Older saved Auto-free selections are cleared automatically. An unlabelled or misleading third-party endpoint cannot be guaranteed to behave like a coding model.
 
-**Free is not unlimited.** Availability, daily limits, regional eligibility, and whether an account is on a free or paid tier can change. Check the provider's current pricing and account limits before relying on it for production. On Google's free tier, prompts may be used to improve its products; check the provider's data terms before sending sensitive code. [1](https://ai.google.dev/gemini-api/docs/pricing)
+**Which model to pick?** [Gemini 3.8 Flash](https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash) is our overall recommendation for software-engineering tasks on a [Google free API tier](https://ai.google.dev/gemini-api/docs/pricing). If you use OpenRouter, start with [Poolside Laguna S 2.1](https://openrouter.ai/poolside/laguna-s-2.1:free), a coding-agent model with 262K context, or [Cohere North Mini Code](https://openrouter.ai/cohere/north-mini-code:free) for quicker iterations. AIFLUX prioritizes a model from a connected provider, respects your manual selection, and removes OpenRouter picks that disappear from the live free catalog. If discovery is unavailable, the curated picks remain visible, but provider availability must be checked at request time. Groq publishes [model IDs](https://console.groq.com/docs/models) and [plan rate limits](https://console.groq.com/docs/rate-limits).
+
+**Free is not unlimited.** Availability, daily limits, regional eligibility, and free-tier terms can change. On Google's free tier, prompts may be used to improve its products; some OpenRouter free variants may also use inputs and outputs for training. Review each provider's terms before sending sensitive code. [Google pricing](https://ai.google.dev/gemini-api/docs/pricing) · [Poolside free-model details](https://openrouter.ai/poolside/laguna-s-2.1:free)
 
 ## What you can do
 
@@ -58,7 +60,7 @@ PORT=3000
 
 - User-provided keys take precedence over server keys for that request. The browser sends a selected key to the AIFLUX server; the server forwards it only to the selected provider over HTTPS. Keys are not written to server storage or logs by AIFLUX.
 - If deploying with **shared server-side keys**, set `AIFLUX_ACCESS_CODE` at a minimum. Visitors must enter it in Settings before sending requests. This is a **shared gate**, not user accounts or a replacement for a proper auth gateway. Protect public instances with authentication and usage controls.
-- The server only calls fixed provider URLs or the operator-configured Ollama URL. The client cannot request arbitrary paid OpenRouter models: only `openrouter/free` and `:free` variants are accepted. The server also applies a basic per-IP request limit and a two-minute upstream timeout.
+- The server only calls fixed provider URLs or the operator-configured Ollama URL. OpenRouter requests must target a specific `:free` chat model; the random router, known safety/utility model IDs, and paid variants are rejected even when requested directly via the API. The server also applies a basic per-IP request limit and a two-minute upstream timeout.
 - Run behind HTTPS in production. Browser storage is not an encrypted vault; avoid “Remember on this device” on shared computers. Review your provider's data-handling policy before sending private code.
 - AIFLUX is a browser-based AI coding **workspace**, not an autonomous repository agent. It doesn't execute shell commands, install packages, or edit files on the server on a user's behalf.
 
@@ -82,7 +84,7 @@ vercel.json          Vite build and SPA routing configuration
 
 ## Verified locally
 
-`npm test` covers the Vercel function entrypoints, provider request validation, free-only OpenRouter routing, Gemini/Groq/Ollama request formats, SSE parsing, error redaction, code-file extraction, and preview sandbox generation. `npm run build` checks the TypeScript app and builds the production bundle. A browser smoke test was also run with a simulated streamed AI response to verify chat → generated file → preview → persistence; real provider calls require your own key and outbound access to that provider.
+`npm test` covers the Vercel function entrypoints, provider request validation, free-only OpenRouter routing, rejection of random/safety/utility models (including unexpected classifier streams and saved browser selections), Gemini/Groq/Ollama request formats, SSE parsing, error redaction, code-file extraction, and preview sandbox generation. `npm run build` checks the TypeScript app and builds the production bundle. A browser smoke test of chat → generated file → preview → persistence used a simulated streamed AI response; live provider calls require your own key and outbound access to that provider.
 
 ---
 

@@ -1,5 +1,6 @@
 import type { Conversation, Credentials, ModelInfo } from '../types';
-import { DEFAULT_MODEL } from './models';
+import { CURATED_MODELS, DEFAULT_MODEL } from './models';
+import { isNonChatModelId, isSelectableOpenRouterId } from './model-policy.mjs';
 
 const CHATS_KEY = 'aiflux.conversations.v1';
 const ACTIVE_KEY = 'aiflux.active.v1';
@@ -34,11 +35,26 @@ export function saveActiveId(id: string | null) {
   } catch { /* Storage may be unavailable. */ }
 }
 
-export function loadModel(): ModelInfo {
+function validSavedModel(): ModelInfo | null {
   try {
-    const parsed = JSON.parse(localStorage.getItem(MODEL_KEY) || 'null');
-    if (parsed && typeof parsed.id === 'string' && typeof parsed.provider === 'string' && typeof parsed.name === 'string') return parsed;
-  } catch { /* Use default. */ }
+    const parsed: ModelInfo = JSON.parse(localStorage.getItem(MODEL_KEY) || 'null');
+    if (!parsed || typeof parsed.id !== 'string' || typeof parsed.name !== 'string') return null;
+    if (parsed.provider === 'openrouter') return isSelectableOpenRouterId(parsed.id) ? parsed : null;
+    if (parsed.provider === 'ollama') return /^[a-zA-Z0-9._:/-]{1,160}$/.test(parsed.id) && !isNonChatModelId(parsed.id) ? parsed : null;
+    // Retired native-provider selections must not survive a catalog update.
+    return CURATED_MODELS.some((model) => model.provider === parsed.provider && model.id === parsed.id) ? parsed : null;
+  } catch { return null; }
+}
+
+export function hasSavedModel(): boolean {
+  return validSavedModel() !== null;
+}
+
+export function loadModel(): ModelInfo {
+  const saved = validSavedModel();
+  if (saved) return saved;
+  // Clear legacy Auto-free and safety-model selections from earlier releases.
+  try { localStorage.removeItem(MODEL_KEY); } catch { /* Use the default in memory. */ }
   return DEFAULT_MODEL;
 }
 

@@ -1,4 +1,5 @@
 import catalog from '../src/data/models.json' with { type: 'json' };
+import { isNonChatModelId, isSelectableOpenRouterId, isUsableFreeCatalogModel } from '../src/lib/model-policy.mjs';
 
 export const SYSTEM_PROMPT = `You are AIFLUX, a thoughtful, highly skilled coding partner. Help the user turn ideas into working software. Be direct, accurate, and encouraging. Ask for clarification only when a missing detail genuinely blocks progress; otherwise make sensible assumptions and say what they are. When asked to build something, provide complete, usable code rather than vague pseudocode. Put each file in its own fenced code block with a language and filename, for example: \`\`\`html filename="index.html". Explain how to run it when useful. If you are uncertain, say so. Never claim to have run, tested, or deployed code unless you actually have.`;
 
@@ -26,8 +27,14 @@ export function validateChat(body, ollamaConfigured = false) {
   if (typeof model !== 'string' || model.length > 180) {
     throw new RequestError(400, 'Choose a valid model.');
   }
-  if (provider === 'openrouter' && model !== 'openrouter/free' && !/^[a-zA-Z0-9._/-]+:free$/.test(model)) {
-    throw new RequestError(400, 'Only OpenRouter free models are available in AIFLUX.');
+  if (provider === 'openrouter' && model === 'openrouter/free') {
+    throw new RequestError(400, 'The random free router can select safety classifiers. Choose a specific free coding model instead.');
+  }
+  if (isNonChatModelId(model)) {
+    throw new RequestError(400, 'That is a safety or utility model, not a coding assistant. Choose a free chat model instead.');
+  }
+  if (provider === 'openrouter' && !isSelectableOpenRouterId(model)) {
+    throw new RequestError(400, 'Only specific OpenRouter :free chat models are available in AIFLUX.');
   }
   if (['gemini', 'groq'].includes(provider) && !catalog.some((entry) => entry.provider === provider && entry.id === model)) {
     throw new RequestError(400, 'This model is not in the supported free-tier catalog.');
@@ -204,18 +211,20 @@ export async function getFreeOpenRouterModels(fetchImpl = fetch) {
   if (!response.ok) throw new Error('Model catalog unavailable');
   const json = await response.json();
   if (!Array.isArray(json.data)) throw new Error('Invalid model catalog');
+  const featured = new Set(catalog.filter((entry) => entry.provider === 'openrouter').map((entry) => entry.id));
   return json.data
-    .filter((model) => typeof model.id === 'string' && /^[a-zA-Z0-9._/-]+:free$/.test(model.id))
+    .filter(isUsableFreeCatalogModel)
     .map((model) => ({
       id: model.id,
       provider: 'openrouter',
       name: String(model.name || model.id).replace(/\s*\(free\)\s*$/i, '').slice(0, 80),
       shortName: String(model.name || model.id).replace(/\s*\(free\)\s*$/i, '').slice(0, 36),
       description: String(model.description || 'A currently available free model on OpenRouter.').slice(0, 200),
-      strength: /coder|code|devstral|kat-coder/i.test(`${model.id} ${model.name}`) ? 'Coding focused' : 'OpenRouter free',
+      strength: /coder|coding|code|software.engineer|devstral|laguna|\bswe\b/i.test(`${model.id} ${model.name} ${model.description || ''}`) ? 'Coding focused' : 'OpenRouter free',
       badge: 'FREE MODEL',
       contextLength: Number(model.context_length) || undefined,
     }))
-    .sort((a, b) => Number(b.strength === 'Coding focused') - Number(a.strength === 'Coding focused') || a.name.localeCompare(b.name))
+    .sort((a, b) => Number(featured.has(b.id)) - Number(featured.has(a.id)) ||
+      Number(b.strength === 'Coding focused') - Number(a.strength === 'Coding focused') || a.name.localeCompare(b.name))
     .slice(0, 100);
 }

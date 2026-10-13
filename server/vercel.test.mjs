@@ -24,7 +24,19 @@ test('Vercel functions route to the shared API instead of returning SPA HTML', a
       body: JSON.stringify({ provider: 'openrouter', model: 'openai/paid', messages: [{ role: 'user', content: 'hi' }] }),
     });
     assert.equal(denied.status, 400);
-    assert.match((await denied.json()).error, /Only OpenRouter free models/);
+    assert.match((await denied.json()).error, /Only specific OpenRouter :free chat models/);
+    const random = await fetch(`${base}/api/chat`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: 'openrouter', model: 'openrouter/free', messages: [{ role: 'user', content: 'Build a website' }] }),
+    });
+    assert.equal(random.status, 400);
+    assert.match((await random.json()).error, /random free router/);
+    const safety = await fetch(`${base}/api/chat`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: 'openrouter', model: 'nvidia/nemotron-3.5-content-safety:free', messages: [{ role: 'user', content: 'Build a website' }] }),
+    });
+    assert.equal(safety.status, 400);
+    assert.match((await safety.json()).error, /safety or utility model/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
