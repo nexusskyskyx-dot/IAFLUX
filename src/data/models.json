@@ -1,30 +1,57 @@
 [
   {
-    "id": "openrouter/free",
+    "id": "gemini-3.8-flash",
+    "provider": "gemini",
+    "name": "Gemini 3.8 Flash",
+    "shortName": "Gemini 3.8",
+    "description": "Google's software-engineering-focused Flash model, with a free API tier and a long context window. Subject to your account's limits.",
+    "strength": "Software engineering",
+    "badge": "BEST OVERALL"
+  },
+  {
+    "id": "poolside/laguna-s-2.1:free",
     "provider": "openrouter",
-    "name": "Free model router",
-    "shortName": "Auto free",
-    "description": "Automatically routes each request to an available free model. A great place to start.",
-    "strength": "Best starting point",
-    "badge": "RECOMMENDED"
+    "name": "Poolside Laguna S 2.1",
+    "shortName": "Laguna S 2.1",
+    "description": "A dedicated coding agent with 262K context. On the free variant, inputs and outputs may be used to improve the model.",
+    "strength": "Coding specialist",
+    "badge": "BEST FOR CODE"
   },
   {
-    "id": "gemini-2.5-flash",
-    "provider": "gemini",
-    "name": "Gemini 2.5 Flash",
-    "shortName": "Gemini Flash",
-    "description": "A versatile Google model with a free API tier. Great for building and explaining code.",
-    "strength": "Everyday building",
-    "badge": "FREE TIER"
+    "id": "cohere/north-mini-code:free",
+    "provider": "openrouter",
+    "name": "Cohere North Mini Code",
+    "shortName": "North Mini Code",
+    "description": "A fast agentic coding model with 256K context for quick edits, explanations, and iterations.",
+    "strength": "Fast coding",
+    "badge": "FAST CODING"
   },
   {
-    "id": "gemini-2.5-flash-lite",
-    "provider": "gemini",
-    "name": "Gemini 2.5 Flash-Lite",
-    "shortName": "Flash-Lite",
-    "description": "Google's lightweight option for quick questions and fast iterations.",
-    "strength": "Quick iterations",
-    "badge": "FREE TIER"
+    "id": "poolside/laguna-xs-2.1:free",
+    "provider": "openrouter",
+    "name": "Poolside Laguna XS 2.1",
+    "shortName": "Laguna XS 2.1",
+    "description": "A lighter coding-agent option for responsive development on OpenRouter's free variant.",
+    "strength": "Coding specialist",
+    "badge": "FREE MODEL"
+  },
+  {
+    "id": "thinkingmachines/inkling:free",
+    "provider": "openrouter",
+    "name": "Thinking Machines Inkling",
+    "shortName": "Inkling",
+    "description": "An open reasoning model suited to coding and complex questions, with a 1M-token context window on its free variant.",
+    "strength": "Long-context coding",
+    "badge": "FREE MODEL"
+  },
+  {
+    "id": "nvidia/nemotron-3-ultra-550b-a55b:free",
+    "provider": "openrouter",
+    "name": "NVIDIA Nemotron 3 Ultra",
+    "shortName": "Nemotron Ultra",
+    "description": "A large open reasoning model for architecture, analysis, and long-context work on a free variant.",
+    "strength": "Deep reasoning",
+    "badge": "FREE MODEL"
   },
   {
     "id": "openai/gpt-oss-120b",
@@ -40,9 +67,18 @@
     "provider": "groq",
     "name": "Qwen 3.8 27B",
     "shortName": "Qwen 3.8",
-    "description": "A capable open model for coding and reasoning, served with Groq’s low-latency inference.",
+    "description": "A capable open model for coding and reasoning, served with Groq's low-latency inference.",
     "strength": "Code & reasoning",
     "badge": "GROQ FREE PLAN"
+  },
+  {
+    "id": "gemini-2.5-flash",
+    "provider": "gemini",
+    "name": "Gemini 2.5 Flash",
+    "shortName": "Gemini Flash",
+    "description": "A versatile Google model with a free API tier. Great for building and explaining code.",
+    "strength": "Everyday building",
+    "badge": "FREE TIER"
   },
   {
     "id": "openai/gpt-oss-20b",
@@ -52,5 +88,14 @@
     "description": "A smaller, fast open-weight reasoning model for focused coding tasks.",
     "strength": "Fast reasoning",
     "badge": "GROQ FREE PLAN"
+  },
+  {
+    "id": "gemini-2.5-flash-lite",
+    "provider": "gemini",
+    "name": "Gemini 2.5 Flash-Lite",
+    "shortName": "Flash-Lite",
+    "description": "Google's lightweight option for quick questions and fast iterations.",
+    "strength": "Quick iterations",
+    "badge": "FREE TIER"
   }
 ]

@@ -3,7 +3,8 @@ import { ArrowDownToLine, Check, ChevronRight, Code2, KeyRound, Menu, PanelRight
 import type { AppConfig, AttachedFile, ChatMessage, Conversation, Credentials, ModelInfo, Provider, WorkspaceFile } from './types';
 import { CURATED_MODELS, DEFAULT_MODEL } from './lib/models';
 import { createDraft, downloadConversation, extractCodeFiles, mergeGeneratedFiles, toProviderMessages } from './lib/files';
-import { loadActiveId, loadConversations, loadCredentials, loadModel, saveActiveId, saveConversations, saveCredentials, saveModel } from './lib/storage';
+import { hasSavedModel, loadActiveId, loadConversations, loadCredentials, loadModel, saveActiveId, saveConversations, saveCredentials, saveModel } from './lib/storage';
+import { isUsableFreeCatalogModel } from './lib/model-policy.mjs';
 import { requestChat } from './lib/chat';
 import { Brand } from './components/Brand';
 import Sidebar from './components/Sidebar';
@@ -21,6 +22,7 @@ export default function App() {
   const [draftChat, setDraftChat] = useState(createDraft);
   const [view, setView] = useState<'studio' | 'library'>('studio');
   const [selectedModel, setSelectedModel] = useState<ModelInfo>(loadModel);
+  const [manualSelection, setManualSelection] = useState(hasSavedModel);
   const [credentials, setCredentials] = useState<Credentials>(loadCredentials);
   const [config, setConfig] = useState<AppConfig>(emptyConfig);
   const [liveModels, setLiveModels] = useState<ModelInfo[]>([]);
@@ -44,9 +46,15 @@ export default function App() {
 
   const activeChat = chats.find((chat) => chat.id === activeId) || draftChat;
   const models = useMemo(() => {
-    const ids = new Set(CURATED_MODELS.map((model) => `${model.provider}:${model.id}`));
-    return [...CURATED_MODELS, ...[...liveModels, ...ollamaModels].filter((model) => !ids.has(`${model.provider}:${model.id}`))];
-  }, [liveModels, ollamaModels]);
+    // Once the live catalog is available, do not advertise curated OpenRouter
+    // variants that are no longer listed as free.
+    const freeModels = liveModels.filter(isUsableFreeCatalogModel);
+    const available = new Set(freeModels.map((model) => model.id));
+    const curated = CURATED_MODELS.filter((model) => model.provider !== 'openrouter' || catalogAvailable !== true || available.has(model.id));
+    const ids = new Set(curated.map((model) => `${model.provider}:${model.id}`));
+    return [...curated, ...[...freeModels, ...ollamaModels]
+      .filter((model) => !ids.has(`${model.provider}:${model.id}`))];
+  }, [catalogAvailable, liveModels, ollamaModels]);
 
   const notify = useCallback((message: string) => {
     setToast(message);
@@ -92,7 +100,7 @@ export default function App() {
       setLiveModels(Array.isArray(result.models) ? result.models : []);
       setOllamaModels(Array.isArray(result.ollamaModels) ? result.ollamaModels : []);
       setCatalogAvailable(Boolean(result.catalogAvailable));
-      catalogLoaded.current = true;
+      catalogLoaded.current = Boolean(result.catalogAvailable);
     } catch {
       setCatalogAvailable(false);
       catalogLoaded.current = false;
@@ -104,6 +112,23 @@ export default function App() {
     return Boolean(credentials.keys[provider] || config.configured[provider]);
   }, [config, credentials, ollamaModels]);
   const anyConnected = (['openrouter', 'gemini', 'groq', 'ollama'] as Provider[]).some(isConnected);
+
+  useEffect(() => { void loadModels(); }, [loadModels]);
+  useEffect(() => {
+    if (manualSelection) return;
+    const preferred = models.find((model) => isConnected(model.provider)) ?? DEFAULT_MODEL;
+    setSelectedModel((current) => current.id === preferred.id && current.provider === preferred.provider ? current : preferred);
+  }, [isConnected, manualSelection, models]);
+  useEffect(() => {
+    if (catalogAvailable !== true || selectedModel.provider !== 'openrouter' ||
+        models.some((model) => model.provider === 'openrouter' && model.id === selectedModel.id)) return;
+    const next = models.find((model) => isConnected(model.provider)) ?? DEFAULT_MODEL;
+    setSelectedModel(next);
+    if (manualSelection) {
+      saveModel(next);
+      notify(`${selectedModel.name} is no longer listed as free. Switched to ${next.name}.`);
+    }
+  }, [catalogAvailable, isConnected, manualSelection, models, notify, selectedModel]);
 
   const openSettings = useCallback((provider?: Provider) => {
     setSettingsProvider(provider);
@@ -117,6 +142,7 @@ export default function App() {
     notify('Connections saved. Let’s make something.');
   };
   const chooseModel = (model: ModelInfo) => {
+    setManualSelection(true);
     setSelectedModel(model);
     saveModel(model);
     if (view === 'library') { setView('studio'); notify(`${model.name} selected`); }

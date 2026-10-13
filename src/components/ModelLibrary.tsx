@@ -23,7 +23,7 @@ export default function ModelLibrary({ models, selected, catalogAvailable, isCon
   const visible = useMemo(() => models.filter((model) => {
     const matches = `${model.name} ${model.id} ${model.description} ${model.strength}`.toLowerCase().includes(search.toLowerCase());
     const group = filter === 'All models' ||
-      (filter === 'Coding' && (/cod|devstral|qwen/i.test(`${model.name} ${model.id} ${model.strength}`) || ['gemini-2.5-flash', 'openai/gpt-oss-120b'].includes(model.id))) ||
+      (filter === 'Coding' && (/cod|devstral|laguna|software.engineer|qwen|inkling/i.test(`${model.name} ${model.id} ${model.strength}`) || ['gemini-2.5-flash', 'openai/gpt-oss-120b'].includes(model.id))) ||
       (filter === 'Local' && model.provider === 'ollama') ||
       (filter !== 'Coding' && filter !== 'Local' && model.provider === filter.toLowerCase());
     return matches && group;
@@ -44,14 +44,14 @@ export default function ModelLibrary({ models, selected, catalogAvailable, isCon
       {visible.length ? <div className="library-grid">{visible.map((model) => {
         const connected = isConnected(model.provider);
         const chosen = selected.id === model.id && selected.provider === model.provider;
-        return <div className={`library-card ${chosen ? 'library-card-chosen' : ''}`} key={`${model.provider}:${model.id}`}>
+        return <div className={`library-card ${chosen ? 'library-card-chosen' : ''} ${model.badge.startsWith('BEST') ? 'library-card-featured' : ''}`} key={`${model.provider}:${model.id}`}>
           <div className="library-card-top"><ProviderIcon provider={model.provider} size="large" /><span className="library-card-badge">{model.badge}</span></div>
           <div className="library-card-provider">{PROVIDERS[model.provider].name} {connected && <span className="library-provider-on"><span /> Connected</span>}</div>
           <h3>{model.name}</h3><p>{model.description}</p>
           <div className="library-card-foot"><span>{model.strength === 'Coding focused' ? <Code2 size={15} /> : model.strength.includes('Fast') ? <Zap size={15} /> : <Sparkles size={15} />}{model.strength}</span><button onClick={() => onSelect(model)}>{chosen ? <><Check size={15} /> Selected</> : <>Use model <ArrowRight size={15} /></>}</button></div>
         </div>;
       })}</div> : <div className="library-empty"><Search size={26} /><h3>No models found</h3><p>Try a different search or filter. New free models appear as providers add them.</p><button onClick={() => { setSearch(''); setFilter('All models'); }}>Clear filters</button></div>}
-      <div className="library-bottom-note"><div className="library-bottom-icon">✳</div><div><strong>Good to know</strong><p>“Free” means a free model variant or access under a provider's free plan—not unlimited usage. Availability, eligibility, and rate limits are set by each provider and may change.</p></div><button onClick={() => onSettings()}>Manage connections <ArrowUpRight size={16} /></button></div>
+      <div className="library-bottom-note"><div className="library-bottom-icon">✳</div><div><strong>Good to know</strong><p>“Free” means a free model variant or free-tier access—not unlimited usage. Safety classifiers, embedding, and reranking endpoints are excluded: choose a chat model for coding. Availability, data use, and rate limits vary by provider.</p></div><button onClick={() => onSettings()}>Manage connections <ArrowUpRight size={16} /></button></div>
     </div>
   </div>;
 }

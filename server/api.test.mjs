@@ -70,6 +70,11 @@ test('API gates shared keys and streams a local Ollama response end to end', asy
   assert.match((await forbidden.json()).error, /access code/);
   const paid = await post({ ...payload, provider: 'openrouter', model: 'openai/gpt-5' }, 'test-access');
   assert.equal(paid.status, 400);
+  const random = await post({ ...payload, provider: 'openrouter', model: 'openrouter/free' }, 'test-access');
+  assert.equal(random.status, 400);
+  assert.match((await random.json()).error, /random free router/);
+  const safety = await post({ ...payload, provider: 'openrouter', model: 'nvidia/nemotron-3.5-content-safety:free' }, 'test-access');
+  assert.equal(safety.status, 400);
   const response = await post(payload, 'test-access');
   assert.equal(response.status, 200);
   assert.match(response.headers.get('content-type'), /text\/event-stream/);
