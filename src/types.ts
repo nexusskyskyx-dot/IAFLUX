@@ -1,4 +1,12 @@
 export type Provider = 'openrouter' | 'gemini' | 'groq' | 'ollama';
+export type SearchMode = 'off' | 'auto' | 'always';
+
+export interface WebSource {
+  title: string;
+  url: string;
+  snippet: string;
+  publishedDate?: string;
+}
 
 export interface ModelInfo {
   id: string;
@@ -24,6 +32,10 @@ export interface ChatMessage {
   status?: 'streaming' | 'done' | 'error';
   model?: string;
   attachments?: AttachedFile[];
+  search?: { query: string; sources: WebSource[] };
+  searchSkipped?: boolean;
+  searchStatus?: 'planning' | 'searching';
+  searchQuery?: string;
 }
 
 export interface WorkspaceFile {
@@ -46,12 +58,14 @@ export interface Conversation {
 export interface AppConfig {
   configured: Record<'openrouter' | 'gemini' | 'groq', boolean>;
   ollamaConfigured: boolean;
+  searchConfigured: boolean;
   requiresAccessCode: boolean;
 }
 
 export interface Credentials {
   keys: Record<'openrouter' | 'gemini' | 'groq', string>;
   accessCode: string;
+  searchKey: string;
   remember: boolean;
 }
 

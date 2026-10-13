@@ -20,7 +20,10 @@ export function validateChat(body, ollamaConfigured = false) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     throw new RequestError(400, 'Invalid request.');
   }
-  const { provider, model, messages } = body;
+  const { provider, model, messages, searchMode = 'off' } = body;
+  if (!['off', 'auto', 'always'].includes(searchMode)) {
+    throw new RequestError(400, 'Choose a valid web search mode.');
+  }
   if (!['openrouter', 'gemini', 'groq', 'ollama'].includes(provider)) {
     throw new RequestError(400, 'Choose a supported provider.');
   }
@@ -56,10 +59,10 @@ export function validateChat(body, ollamaConfigured = false) {
   if (totalLength > 180_000 || cleanMessages.at(-1).role !== 'user') {
     throw new RequestError(400, 'Conversation is too long or does not end with a user message. Start a new chat or shorten the context.');
   }
-  return { provider, model, messages: cleanMessages };
+  return { provider, model, messages: cleanMessages, searchMode };
 }
 
-export function buildRequest({ provider, model, messages }, key, ollamaBaseUrl) {
+export function buildRequest({ provider, model, messages, systemPrompt = SYSTEM_PROMPT }, key, ollamaBaseUrl) {
   if (provider !== 'ollama' && !key) {
     throw new RequestError(401, `Connect your ${providerName(provider)} API key in Settings to continue.`);
   }
@@ -71,7 +74,7 @@ export function buildRequest({ provider, model, messages }, key, ollamaBaseUrl) 
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
         body: JSON.stringify({
-          systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+          systemInstruction: { parts: [{ text: systemPrompt }] },
           contents: messages.map(({ role, content }) => ({
             role: role === 'assistant' ? 'model' : 'user',
             parts: [{ text: content }],
@@ -89,7 +92,7 @@ export function buildRequest({ provider, model, messages }, key, ollamaBaseUrl) 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model,
-          messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...messages],
+          messages: [{ role: 'system', content: systemPrompt }, ...messages],
           stream: true,
         }),
       },
@@ -107,7 +110,7 @@ export function buildRequest({ provider, model, messages }, key, ollamaBaseUrl) 
       },
       body: JSON.stringify({
         model,
-        messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...messages],
+        messages: [{ role: 'system', content: systemPrompt }, ...messages],
         stream: true,
       }),
     },
