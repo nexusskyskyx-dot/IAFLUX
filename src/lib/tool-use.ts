@@ -126,17 +126,17 @@ export function stripToolCalls(text: string): string {
   // calls don't leak as literal XML in the rendered message.
   const decoded = decodeToolEntities(text);
   const normalised = normaliseToolBlocks(decoded);
-  const masked = withoutFencedCode(normalised);
-  const pattern = /<af-tool\b[^>]*>[\s\S]*?<\/af-tool>/g;
-  const removals: Array<[number, number]> = [];
-  let m: RegExpExecArray | null;
-  while ((m = pattern.exec(masked)) !== null) removals.push([m.index, m.index + m[0].length]);
-  let out = normalised;
-  for (let i = removals.length - 1; i >= 0; i--) {
-    const [start, end] = removals[i];
-    out = out.slice(0, start) + out.slice(end);
-  }
-  return out.replace(/\n{3,}/g, '\n\n').trim();
+  // Split on fenced code blocks; we only strip tool calls from OUTSIDE fences
+  // so example/quoted <af-tool> snippets inside ``` are preserved verbatim.
+  const segments = normalised.split(/(```[\s\S]*?```|~~~[\s\S]*?~~~)/g);
+  const stripped = segments.map((segment) => {
+    if (segment.startsWith('```') || segment.startsWith('~~~')) return segment;
+    let s = segment;
+    s = s.replace(/<af-tool\b[^>]*>[\s\S]*?<\/af-tool>/g, '');
+    s = s.replace(/<af-tool\b[^>]*>[\s\S]*$/g, '');
+    return s;
+  });
+  return stripped.join('').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 function isToolName(name: string): name is ToolName {

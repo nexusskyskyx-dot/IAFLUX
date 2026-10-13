@@ -46,3 +46,12 @@ test('stripToolCalls removes escaped/bare/wrapped tool blocks from visible prose
     'a  b',
   );
 });
+
+test('stripToolCalls removes truncated/unclosed tool blocks from cut-off streams', () => {
+  // Simulates a rate-limit or timeout that left a half-written af-tool block
+  // with no closing tag.
+  const truncated = 'Here is the page:\n\n&lt;af-tool name="write_file" id="t2"&gt;\n&lt;arg name="filename"&gt;index.html&lt;/arg&gt;\n&lt;arg name="content"&gt;&lt;!DOCTYPE html&gt;\n&lt;html&gt;&lt;body&gt;&lt;h1&gt;Hi';
+  const stripped = stripToolCalls(truncated);
+  assert.doesNotMatch(stripped, /af-tool|write_file|<arg|&lt;/);
+  assert.match(stripped, /Here is the page/);
+});

@@ -251,7 +251,9 @@ export default function App() {
             }
             if (event.type === 'delta') {
               responseText += event.text;
-              // Strip any <af-tool> blocks in-flight so the user sees prose, not raw XML.
+              // Strip any <af-tool> blocks (complete or partial/truncated) so
+              // the user never sees raw XML while streaming or after a cut-off
+              // (rate-limit, timeout, abort).
               const visible = stripToolCalls(responseText);
               patchMessage(chatId, assistantId, (message) => ({ ...message, content: visible, status: 'streaming' }));
             }
@@ -264,11 +266,26 @@ export default function App() {
       } catch (error) {
         const aborted = controller.signal.aborted;
         const message = error instanceof Error ? error.message : 'Something went wrong.';
-        patchMessage(chatId, assistantId, (previous) => ({
-          ...previous, content: previous.content || (aborted ? 'Generation stopped.' : `**Could not generate a response.** ${message}`),
-          status: 'error', searchStatus: undefined, searchQuery: undefined,
-        }));
-        if (!aborted) notify(message);
+        // If the response was cut off mid tool-call (rate limit, provider abort,
+        // timeout), show whatever prose we already received plus a gentle note
+        // rather than a wall of raw XML.
+        const visible = stripToolCalls(responseText || '').trim();
+        const midTool = /<(?:af-tool|list_files|read_file|write_file|create_file|edit_file|delete_file|view_preview)\b/i.test(responseText || '')
+                     || /&lt;(?:af-tool|list_files|read_file|write_file|create_file|edit_file|delete_file|view_preview)\b/i.test(responseText || '');
+        if (visible || midTool) {
+          patchMessage(chatId, assistantId, (previous) => ({
+            ...previous,
+            content: visible + (visible && midTool ? '\n\n' : '') + (midTool ? '⚠️ *The AI was interrupted while working on the Canvas. Try sending the request again to finish the edit.*' : ''),
+            status: 'error', searchStatus: undefined, searchQuery: undefined,
+          }));
+          if (midTool) notify('The AI was interrupted mid-edit. The Canvas may be only partially updated — try again to finish.');
+        } else {
+          patchMessage(chatId, assistantId, (previous) => ({
+            ...previous, content: previous.content || (aborted ? 'Generation stopped.' : `**Could not generate a response.** ${message}`),
+            status: 'error', searchStatus: undefined, searchQuery: undefined,
+          }));
+          if (!aborted) notify(message);
+        }
         return;
       }
 
