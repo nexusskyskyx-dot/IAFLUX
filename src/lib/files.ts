@@ -160,6 +160,8 @@ export function downloadConversation(conversation: Conversation) {
     ...conversation.messages.flatMap((message: ChatMessage) => [
       `## ${message.role === 'user' ? 'You' : 'AIFLUX'}`,
       message.attachments?.length ? `Attachments: ${message.attachments.map((file) => file.name).join(', ')}` : '',
+      message.searchSkipped ? 'No live web search was used.' : '',
+      message.search ? `Web search: ${message.search.query}\n${message.search.sources.map((source, index) => `- [${index + 1}] ${source.title} — ${source.url}`).join('\n') || 'No sources found.'}` : '',
       '', message.content, '',
     ]),
   ].join('\n');

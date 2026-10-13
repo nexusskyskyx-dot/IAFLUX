@@ -42,3 +42,48 @@ test('migrates saved random/safety models while retaining named free chat select
     await vite.close();
   }
 });
+
+test('web search preference and Tavily key persist with existing session/remember settings', async () => {
+  const vite = await createServer({
+    configFile: false, appType: 'custom', optimizeDeps: { noDiscovery: true, include: [] },
+    server: { middlewareMode: true },
+  });
+  const originalLocal = globalThis.localStorage;
+  const originalSession = globalThis.sessionStorage;
+  const local = new Map();
+  const session = new Map();
+  const storage = (values) => ({
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+    removeItem: (key) => values.delete(key),
+  });
+  globalThis.localStorage = storage(local);
+  globalThis.sessionStorage = storage(session);
+  try {
+    const { loadSearchMode, saveSearchMode, loadCredentials, saveCredentials } = await vite.ssrLoadModule('/src/lib/storage.ts');
+    assert.equal(loadSearchMode(), 'off');
+    saveSearchMode('auto');
+    assert.equal(loadSearchMode(), 'auto');
+    saveSearchMode('always');
+    assert.equal(local.get('aiflux.search-mode.v1'), 'always');
+    assert.equal(loadSearchMode(), 'always');
+    local.set('aiflux.search-mode.v1', 'invalid');
+    assert.equal(loadSearchMode(), 'off');
+    const credentials = { keys: { openrouter: '', gemini: 'ai-key', groq: '' }, searchKey: 'tavily-key', accessCode: '', remember: false };
+    saveCredentials(credentials);
+    assert.equal(local.has('aiflux.credentials.v1'), false);
+    assert.equal(loadCredentials().searchKey, 'tavily-key');
+    saveCredentials({ ...credentials, remember: true });
+    assert.equal(session.has('aiflux.credentials.v1'), false);
+    assert.equal(local.has('aiflux.credentials.v1'), true);
+    assert.equal(loadCredentials().searchKey, 'tavily-key');
+    local.set('aiflux.credentials.v1', JSON.stringify({ keys: credentials.keys, remember: true }));
+    assert.equal(loadCredentials().searchKey, ''); // Legacy saved settings still work.
+  } finally {
+    if (originalLocal === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = originalLocal;
+    if (originalSession === undefined) delete globalThis.sessionStorage;
+    else globalThis.sessionStorage = originalSession;
+    await vite.close();
+  }
+});

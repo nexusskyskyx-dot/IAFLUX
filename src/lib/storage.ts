@@ -1,4 +1,4 @@
-import type { Conversation, Credentials, ModelInfo } from '../types';
+import type { Conversation, Credentials, ModelInfo, SearchMode } from '../types';
 import { CURATED_MODELS, DEFAULT_MODEL } from './models';
 import { isNonChatModelId, isSelectableOpenRouterId } from './model-policy.mjs';
 
@@ -6,6 +6,7 @@ const CHATS_KEY = 'aiflux.conversations.v1';
 const ACTIVE_KEY = 'aiflux.active.v1';
 const MODEL_KEY = 'aiflux.model.v1';
 const CREDS_KEY = 'aiflux.credentials.v1';
+const SEARCH_MODE_KEY = 'aiflux.search-mode.v1';
 
 export function loadConversations(): Conversation[] {
   try {
@@ -62,8 +63,19 @@ export function saveModel(model: ModelInfo) {
   try { localStorage.setItem(MODEL_KEY, JSON.stringify(model)); } catch { /* Use in memory. */ }
 }
 
+export function loadSearchMode(): SearchMode {
+  try {
+    const value = localStorage.getItem(SEARCH_MODE_KEY);
+    return value === 'auto' || value === 'always' ? value : 'off';
+  } catch { return 'off'; }
+}
+
+export function saveSearchMode(mode: SearchMode) {
+  try { localStorage.setItem(SEARCH_MODE_KEY, mode); } catch { /* In-memory preference still works. */ }
+}
+
 export function loadCredentials(): Credentials {
-  const empty: Credentials = { keys: { openrouter: '', gemini: '', groq: '' }, accessCode: '', remember: false };
+  const empty: Credentials = { keys: { openrouter: '', gemini: '', groq: '' }, accessCode: '', searchKey: '', remember: false };
   try {
     const persistent = localStorage.getItem(CREDS_KEY);
     const raw = persistent || sessionStorage.getItem(CREDS_KEY);
@@ -76,6 +88,7 @@ export function loadCredentials(): Credentials {
         groq: String(parsed.keys?.groq || ''),
       },
       accessCode: String(parsed.accessCode || ''),
+      searchKey: String(parsed.searchKey || ''),
       remember: Boolean(persistent),
     };
   } catch { return empty; }

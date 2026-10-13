@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDownToLine, Check, ChevronRight, Code2, KeyRound, Menu, PanelRightOpen } from 'lucide-react';
-import type { AppConfig, AttachedFile, ChatMessage, Conversation, Credentials, ModelInfo, Provider, WorkspaceFile } from './types';
+import type { AppConfig, AttachedFile, ChatMessage, Conversation, Credentials, ModelInfo, Provider, SearchMode, WorkspaceFile } from './types';
 import { CURATED_MODELS, DEFAULT_MODEL } from './lib/models';
 import { createDraft, downloadConversation, extractCodeFiles, mergeGeneratedFiles, toProviderMessages } from './lib/files';
-import { hasSavedModel, loadActiveId, loadConversations, loadCredentials, loadModel, saveActiveId, saveConversations, saveCredentials, saveModel } from './lib/storage';
+import { hasSavedModel, loadActiveId, loadConversations, loadCredentials, loadModel, loadSearchMode, saveActiveId, saveConversations, saveCredentials, saveModel, saveSearchMode } from './lib/storage';
 import { isUsableFreeCatalogModel } from './lib/model-policy.mjs';
 import { requestChat } from './lib/chat';
 import { Brand } from './components/Brand';
@@ -13,7 +13,7 @@ import Canvas from './components/Canvas';
 import ModelLibrary from './components/ModelLibrary';
 import SettingsModal from './components/SettingsModal';
 
-const emptyConfig: AppConfig = { configured: { openrouter: false, gemini: false, groq: false }, ollamaConfigured: false, requiresAccessCode: false };
+const emptyConfig: AppConfig = { configured: { openrouter: false, gemini: false, groq: false }, ollamaConfigured: false, searchConfigured: false, requiresAccessCode: false };
 
 export default function App() {
   const [initial] = useState(() => ({ chats: loadConversations(), activeId: loadActiveId() }));
@@ -24,6 +24,7 @@ export default function App() {
   const [selectedModel, setSelectedModel] = useState<ModelInfo>(loadModel);
   const [manualSelection, setManualSelection] = useState(hasSavedModel);
   const [credentials, setCredentials] = useState<Credentials>(loadCredentials);
+  const [searchMode, setSearchMode] = useState<SearchMode>(loadSearchMode);
   const [config, setConfig] = useState<AppConfig>(emptyConfig);
   const [liveModels, setLiveModels] = useState<ModelInfo[]>([]);
   const [ollamaModels, setOllamaModels] = useState<ModelInfo[]>([]);
@@ -147,6 +148,12 @@ export default function App() {
     saveModel(model);
     if (view === 'library') { setView('studio'); notify(`${model.name} selected`); }
   };
+  const cycleSearchMode = () => {
+    const next: SearchMode = searchMode === 'off' ? 'auto' : searchMode === 'auto' ? 'always' : 'off';
+    setSearchMode(next);
+    saveSearchMode(next);
+    notify(next === 'auto' ? 'Web search: the AI chooses when to look things up.' : next === 'always' ? 'Web search: search before every answer.' : 'Web search turned off.');
+  };
   const changeView = (next: 'studio' | 'library') => {
     setView(next);
     setMobileSidebarOpen(false);
@@ -190,7 +197,7 @@ export default function App() {
     const chatId = activeChat.id;
     const userMessage: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: text, createdAt: now, attachments };
     const assistantId = crypto.randomUUID();
-    const assistantMessage: ChatMessage = { id: assistantId, role: 'assistant', content: '', createdAt: now, status: 'streaming', model: selectedModel.name };
+    const assistantMessage: ChatMessage = { id: assistantId, role: 'assistant', content: '', createdAt: now, status: 'streaming', model: selectedModel.name, ...(searchMode !== 'off' ? { searchStatus: 'planning' } : {}) };
     const history = toProviderMessages([...activeChat.messages, userMessage]);
     if (history.reduce((sum, message) => sum + message.content.length, 0) > 180_000) { notify('This message is too long. Remove an attachment or shorten it.'); return false; }
     const updated: Conversation = {
@@ -209,9 +216,22 @@ export default function App() {
       model: selectedModel.id,
       messages: history,
       key: selectedModel.provider !== 'ollama' ? credentials.keys[selectedModel.provider] : '',
+      searchKey: credentials.searchKey,
+      searchMode,
       accessCode: credentials.accessCode,
       signal: controller.signal,
       onEvent: (event) => {
+        if (event.type === 'search') {
+          patchMessage(chatId, assistantId, (message) => ({ ...message,
+            searchStatus: event.phase === 'skipped' ? undefined : event.phase,
+            searchSkipped: event.phase === 'skipped',
+            searchQuery: event.query,
+          }));
+        }
+        if (event.type === 'sources') {
+          patchMessage(chatId, assistantId, (message) => ({ ...message, searchStatus: undefined, searchQuery: undefined,
+            search: { query: event.query, sources: event.sources } }));
+        }
         if (event.type === 'delta') {
           responseText += event.text;
           patchMessage(chatId, assistantId, (message) => ({ ...message, content: message.content + event.text }));
@@ -231,7 +251,7 @@ export default function App() {
         return {
           ...chat, updatedAt: Date.now(), files,
           selectedFileId: generated[0]?.id || chat.selectedFileId,
-          messages: chat.messages.map((message) => message.id === assistantId ? { ...message, content: text, status: 'done', model: actualModel } : message),
+          messages: chat.messages.map((message) => message.id === assistantId ? { ...message, content: text, status: 'done', model: actualModel, searchStatus: undefined, searchQuery: undefined } : message),
         };
       }));
       if (count) notify(`${count} ${count === 1 ? 'file' : 'files'} added to Canvas`);
@@ -239,7 +259,7 @@ export default function App() {
       const aborted = controller.signal.aborted;
       const message = error instanceof Error ? error.message : 'Something went wrong.';
       patchMessage(chatId, assistantId, (previous) => ({
-        ...previous, content: previous.content || (aborted ? 'Generation stopped.' : `**Could not generate a response.** ${message}`), status: 'error',
+        ...previous, content: previous.content || (aborted ? 'Generation stopped.' : `**Could not generate a response.** ${message}`), status: 'error', searchStatus: undefined, searchQuery: undefined,
       }));
       if (!aborted) notify(message);
     }).finally(() => {
@@ -294,7 +314,13 @@ export default function App() {
     <Sidebar chats={chats} activeId={activeId} view={view} connected={anyConnected} mobileOpen={mobileSidebarOpen} onCloseMobile={() => setMobileSidebarOpen(false)} onNew={newChat} onSelect={selectChat} onDelete={deleteChat} onView={changeView} onSettings={() => openSettings()} />
     <main className="main-column">
       <header className="topbar"><div className="topbar-left"><button className="icon-button mobile-menu-button" onClick={() => setMobileSidebarOpen(true)} aria-label="Open menu"><Menu size={21} /></button><span className="mobile-brand"><Brand /></span><div className="topbar-breadcrumb"><span>Workspace</span><ChevronRight size={15} /><strong>{view === 'library' ? 'Model library' : activeChat.messages.length ? activeChat.title : 'New conversation'}</strong></div></div><div className="topbar-actions"><button className={`topbar-connection ${anyConnected ? 'connected' : ''}`} onClick={() => openSettings()} title={anyConnected ? 'Manage AI connections' : 'Connect an AI model'} aria-label={anyConnected ? 'Manage AI connections' : 'Connect an AI model'}><span className="topbar-connection-dot" /> <span>{anyConnected ? 'Models connected' : 'Connect a model'}</span><KeyRound size={14} /></button>{view === 'studio' && activeChat.messages.length > 0 && <button className="topbar-action-button export-button" onClick={() => downloadConversation(activeChat)} title="Export conversation as Markdown"><ArrowDownToLine size={17} /><span>Export</span></button>}<span className="topbar-divider" /><button className={`topbar-canvas-button ${canvasVisible ? 'is-open' : ''}`} onClick={toggleCanvas}><Code2 size={17} /><span>Canvas</span>{!canvasVisible ? <PanelRightOpen size={15} /> : <span className="canvas-button-spark">✳</span>}</button><button className="topbar-avatar" onClick={() => openSettings()} aria-label="Open settings">AF</button></div></header>
-      {view === 'studio' ? <ChatPanel conversation={activeChat} selectedModel={selectedModel || DEFAULT_MODEL} models={models} catalogAvailable={catalogAvailable} connected={anyConnected} sending={sending} contextFile={contextFile} isConnected={isConnected} onSend={sendMessage} onStop={stop} onSelectModel={chooseModel} onLoadModels={() => void loadModels()} onLibrary={() => changeView('library')} onOpenSnippet={openSnippet} onClearContext={() => setContextFile(null)} onNotify={notify} onSettings={() => openSettings()} /> : <ModelLibrary models={models} selected={selectedModel} catalogAvailable={catalogAvailable} isConnected={isConnected} onSelect={chooseModel} onSettings={openSettings} onRefresh={() => void loadModels(true)} />}
+      {view === 'studio' ? <ChatPanel conversation={activeChat} selectedModel={selectedModel || DEFAULT_MODEL} models={models}
+        catalogAvailable={catalogAvailable} connected={anyConnected} sending={sending} contextFile={contextFile}
+        searchMode={searchMode} onCycleSearchMode={cycleSearchMode} isConnected={isConnected} onSend={sendMessage}
+        onStop={stop} onSelectModel={chooseModel} onLoadModels={() => void loadModels()}
+        onLibrary={() => changeView('library')} onOpenSnippet={openSnippet} onClearContext={() => setContextFile(null)}
+        onNotify={notify} onSettings={() => openSettings()} />
+        : <ModelLibrary models={models} selected={selectedModel} catalogAvailable={catalogAvailable} isConnected={isConnected} onSelect={chooseModel} onSettings={openSettings} onRefresh={() => void loadModels(true)} />}
     </main>
     {(canvasVisible || mobileCanvasOpen) && <Canvas conversation={activeChat} mobileOpen={mobileCanvasOpen} onClose={closeCanvas} onSelectFile={selectFile} onUpdateFile={updateFile} onCreateFile={createFile} onDeleteFile={deleteFile} onAddContext={addContext} onNotify={notify} />}
     {mobileCanvasOpen && <button className="canvas-mobile-scrim" aria-label="Close Canvas" onClick={() => setMobileCanvasOpen(false)} />}

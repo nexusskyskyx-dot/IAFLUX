@@ -1,8 +1,10 @@
-import type { Provider } from '../types';
+import type { Provider, SearchMode, WebSource } from '../types';
 
 export type StreamEvent =
   | { type: 'start' | 'model' | 'done'; model: string }
   | { type: 'delta'; text: string }
+  | { type: 'search'; phase: 'planning' | 'searching' | 'skipped'; query?: string }
+  | { type: 'sources'; query: string; sources: WebSource[] }
   | { type: 'error'; message: string };
 
 export async function requestChat(input: {
@@ -10,6 +12,8 @@ export async function requestChat(input: {
   model: string;
   messages: { role: 'user' | 'assistant'; content: string }[];
   key: string;
+  searchKey: string;
+  searchMode: SearchMode;
   accessCode: string;
   signal: AbortSignal;
   onEvent: (event: StreamEvent) => void;
@@ -19,9 +23,10 @@ export async function requestChat(input: {
     headers: {
       'Content-Type': 'application/json',
       ...(input.key ? { 'x-aiflux-key': input.key } : {}),
+      ...(input.searchMode !== 'off' && input.searchKey ? { 'x-aiflux-search-key': input.searchKey } : {}),
       ...(input.accessCode ? { 'x-aiflux-access-code': input.accessCode } : {}),
     },
-    body: JSON.stringify({ provider: input.provider, model: input.model, messages: input.messages }),
+    body: JSON.stringify({ provider: input.provider, model: input.model, messages: input.messages, searchMode: input.searchMode }),
     signal: input.signal,
   });
   if (!response.ok) {

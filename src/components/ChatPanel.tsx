@@ -1,8 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ArrowRight, ArrowUpRight, Braces, Check, ChevronDown, Code2, Copy, FileCode2, Lightbulb, Paperclip, Send, Sparkles, Square, WandSparkles, X } from 'lucide-react';
+import { ArrowRight, ArrowUpRight, Braces, Check, ChevronDown, Code2, Copy, FileCode2, Globe2, Lightbulb, Paperclip, Send, Sparkles, Square, WandSparkles, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { AttachedFile, ChatMessage, Conversation, ModelInfo, Provider } from '../types';
+import type { AttachedFile, ChatMessage, Conversation, ModelInfo, Provider, SearchMode } from '../types';
 import { FluxMark, ProviderIcon } from './Brand';
 import ModelPicker from './ModelPicker';
 
@@ -13,6 +13,8 @@ interface Props {
   catalogAvailable: boolean | null;
   connected: boolean;
   sending: boolean;
+  searchMode: SearchMode;
+  onCycleSearchMode: () => void;
   contextFile: AttachedFile | null;
   isConnected: (provider: Provider) => boolean;
   onSend: (text: string, attachments: AttachedFile[]) => boolean;
@@ -53,6 +55,24 @@ function MessageBody({ message, onOpenSnippet, onNotify }: { message: ChatMessag
     code: ({ children, className }) => <code className={className || 'inline-code'}>{children}</code>,
     a: ({ children, href }) => <a href={href} target="_blank" rel="noopener noreferrer">{children}<ArrowUpRight size={12} /></a>,
   }}>{message.content}</ReactMarkdown></div>;
+}
+
+function SearchSources({ message }: { message: ChatMessage }) {
+  if (message.searchStatus) return <div className="message-search-progress" role="status"><Globe2 size={15} />{message.searchStatus === 'planning' ? 'Deciding whether live search is needed…' : `Searching the web: ${message.searchQuery || 'finding sources'}…`}</div>;
+  if (message.searchSkipped) return <div className="message-search-skipped"><Globe2 size={14} /> No live web search used for this answer.</div>;
+  if (!message.search) return null;
+  const sources = (Array.isArray(message.search.sources) ? message.search.sources : []).flatMap((source) => {
+    try {
+      const url = new URL(source.url);
+      return url.protocol === 'https:' ? [{ ...source, host: url.hostname }] : [];
+    } catch { return []; }
+  });
+  return <div className="message-web-sources">
+    <div className="message-web-heading"><Globe2 size={15} /><strong>LIVE WEB SEARCH</strong><span>{message.search.query}</span></div>
+    {sources.length ? <div className="message-web-links">{sources.map((source, index) => <a key={source.url} href={source.url} target="_blank" rel="noopener noreferrer" title={source.snippet}>
+      <span className="message-web-number">{index + 1}</span><span><strong>{source.title}</strong><small>{source.host}{source.publishedDate ? ` · ${source.publishedDate}` : ''}</small></span><ArrowUpRight size={13} />
+    </a>)}</div> : <p className="message-web-empty">No sources were found. Check any time-sensitive claims before relying on them.</p>}
+  </div>;
 }
 
 export default function ChatPanel(props: Props) {
@@ -106,6 +126,7 @@ export default function ChatPanel(props: Props) {
   const copyMessage = (message: ChatMessage) => {
     navigator.clipboard.writeText(message.content).then(() => { setCopiedId(message.id); window.setTimeout(() => setCopiedId(null), 1800); }).catch(() => props.onNotify('Could not copy to clipboard'));
   };
+  const nextSearchMode = { off: 'Auto', auto: 'Always', always: 'Off' }[props.searchMode];
 
   return <div className={`chat-panel ${messages.length ? 'has-messages' : ''}`}>
     {messages.length === 0 ? <div className="hero-scroll"><div className="welcome">
@@ -120,7 +141,8 @@ export default function ChatPanel(props: Props) {
       {messages.map((message) => <div className={`message message-${message.role}`} key={message.id}>
         <div className="message-avatar">{message.role === 'assistant' ? <FluxMark size={29} /> : <span>YOU</span>}</div>
         <div className="message-main"><div className="message-byline"><strong>{message.role === 'assistant' ? 'AIFLUX' : 'You'}</strong><span>{message.role === 'assistant' ? message.model ? message.model.split('/').at(-1)?.replace(':free', '') : 'Coding partner' : new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>
-          {message.role === 'assistant' && !message.content && message.status === 'streaming' ? <div className="thinking-line"><span className="thinking-dots"><i /><i /><i /></span> Putting thoughts into motion...</div> : message.content ? <MessageBody message={message} onOpenSnippet={props.onOpenSnippet} onNotify={props.onNotify} /> : null}
+          {message.role === 'assistant' && <SearchSources message={message} />}
+          {message.role === 'assistant' && !message.content && message.status === 'streaming' ? <div className="thinking-line"><span className="thinking-dots"><i /><i /><i /></span> {message.searchStatus ? 'Checking live sources...' : 'Putting thoughts into motion...'}</div> : message.content ? <MessageBody message={message} onOpenSnippet={props.onOpenSnippet} onNotify={props.onNotify} /> : null}
           {message.attachments?.length ? <div className="message-attachments">{message.attachments.map((file, index) => <span key={`${file.name}-${index}`}><FileCode2 size={13} />{file.name}</span>)}</div> : null}
           {message.status === 'error' && <div className="message-interrupted">Response interrupted. You can try sending your message again.</div>}
           {message.role === 'assistant' && message.content && message.status !== 'streaming' && <div className="message-actions"><button onClick={() => copyMessage(message)}>{copiedId === message.id ? <Check size={14} /> : <Copy size={14} />}{copiedId === message.id ? 'Copied' : 'Copy response'}</button></div>}
@@ -134,11 +156,11 @@ export default function ChatPanel(props: Props) {
       <div className={`composer ${props.sending ? 'composer-sending' : ''}`}>
         {attached.length > 0 && <div className="composer-attachments">{attached.map((file, index) => <span key={`${file.name}-${index}`}><FileCode2 size={14} /> <span>{file.name}</span> <button onClick={() => index < files.length ? setFiles((previous) => previous.filter((_, fileIndex) => fileIndex !== index)) : props.onClearContext()} aria-label={`Remove ${file.name}`}><X size={13} /></button></span>)}</div>}
         <textarea ref={textRef} value={draft} onChange={(event) => { setDraft(event.target.value); event.target.style.height = 'auto'; event.target.style.height = `${Math.min(event.target.scrollHeight, 160)}px`; }} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send(); } }} placeholder="Ask anything, or tell me what you want to build..." aria-label="Message AIFLUX" rows={2} maxLength={30_000} />
-        <div className="composer-toolbar"><div className="composer-tools"><input ref={fileInput} type="file" hidden multiple accept=".txt,.md,.js,.jsx,.ts,.tsx,.json,.html,.css,.scss,.py,.sh,.svg,.xml,.yaml,.yml,.sql,.java,.go,.rs" onChange={(event) => void attachFiles(event.target.files)} /><button className="composer-attach" onClick={() => fileInput.current?.click()} title="Attach a code or text file" aria-label="Attach a file"><Paperclip size={18} strokeWidth={1.7} /></button><span className="toolbar-divider" /><button className="model-trigger" onClick={() => { if (!pickerOpen) props.onLoadModels(); setPickerOpen((open) => !open); }} aria-expanded={pickerOpen}><ProviderIcon provider={props.selectedModel.provider} size="small" /><span className="model-trigger-name">{props.selectedModel.shortName}</span><span className={`model-trigger-status ${props.isConnected(props.selectedModel.provider) ? 'ready' : ''}`} /><ChevronDown size={15} /></button></div>
+        <div className="composer-toolbar"><div className="composer-tools"><input ref={fileInput} type="file" hidden multiple accept=".txt,.md,.js,.jsx,.ts,.tsx,.json,.html,.css,.scss,.py,.sh,.svg,.xml,.yaml,.yml,.sql,.java,.go,.rs" onChange={(event) => void attachFiles(event.target.files)} /><button className="composer-attach" onClick={() => fileInput.current?.click()} title="Attach a code or text file" aria-label="Attach a file"><Paperclip size={18} strokeWidth={1.7} /></button><span className="toolbar-divider" /><button className="model-trigger" onClick={() => { if (!pickerOpen) props.onLoadModels(); setPickerOpen((open) => !open); }} aria-expanded={pickerOpen} aria-label={`Select model: ${props.selectedModel.name}`}><ProviderIcon provider={props.selectedModel.provider} size="small" /><span className="model-trigger-name">{props.selectedModel.shortName}</span><span className={`model-trigger-status ${props.isConnected(props.selectedModel.provider) ? 'ready' : ''}`} /><ChevronDown size={15} /></button><span className="toolbar-divider" /><button type="button" className={`composer-search composer-search-${props.searchMode}`} onClick={props.onCycleSearchMode} title={`Web search: ${props.searchMode}. Click for ${nextSearchMode}.`} aria-label={`Web search ${props.searchMode}. Switch to ${nextSearchMode}.`}><Globe2 size={16} /><span>Web</span><strong>{props.searchMode}</strong></button></div>
           {props.sending ? <button className="send-button stop-button" onClick={props.onStop} title="Stop generation" aria-label="Stop generation"><Square size={15} fill="currentColor" /></button> : <button className="send-button" onClick={send} disabled={!draft.trim()} title="Send message" aria-label="Send message"><Send size={17} strokeWidth={2} /></button>}
         </div>
       </div>
-      <div className="composer-hint"><span><span className="hint-star">✳</span> Built to help you build better.</span><span>Enter to send <span className="hint-divider">·</span> Shift + Enter for a new line</span></div>
+      <div className="composer-hint"><span><span className="hint-star">✳</span> {props.searchMode === 'off' ? 'Built to help you build better.' : props.searchMode === 'auto' ? 'Web search when the AI needs it.' : 'Web search on every message.'}</span><span>Enter to send <span className="hint-divider">·</span> Shift + Enter for a new line</span></div>
     </div></div>
   </div>;
 }

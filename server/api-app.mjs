@@ -3,13 +3,15 @@ import express from 'express';
 import { isNonChatModelId } from '../src/lib/model-policy.mjs';
 import { timingSafeEqual } from 'node:crypto';
 import {
-  RequestError, validateChat, buildRequest, friendlyUpstreamError,
+  RequestError, SYSTEM_PROMPT, validateChat, buildRequest, friendlyUpstreamError,
   readSSE, readLines, extractChunk, getFreeOpenRouterModels,
 } from './providers.mjs';
+import { planWebSearch, searchWeb, withSearchContext } from './search.mjs';
 
 const app = express();
 const ollamaBaseUrl = process.env.OLLAMA_BASE_URL?.trim() || '';
 const accessCode = process.env.AIFLUX_ACCESS_CODE || '';
+const envSearchKey = process.env.TAVILY_API_KEY?.trim() || '';
 const envKeys = {
   openrouter: process.env.OPENROUTER_API_KEY || '',
   gemini: process.env.GEMINI_API_KEY || '',
@@ -33,6 +35,7 @@ app.get('/api/config', (_req, res) => {
   res.json({
     configured: Object.fromEntries(Object.entries(envKeys).map(([provider, key]) => [provider, Boolean(key)])),
     ollamaConfigured: Boolean(ollamaBaseUrl),
+    searchConfigured: Boolean(envSearchKey),
     requiresAccessCode: Boolean(accessCode),
   });
 });
@@ -79,6 +82,10 @@ function rateLimit(req, res, next) {
     for (const [key, value] of limits) if (now - value.start > 10 * 60_000) limits.delete(key);
   }
   if (window.count > 60) return res.status(429).json({ error: 'Too many requests from this workspace. Please try again in a few minutes.' });
+  if (['auto', 'always'].includes(req.body?.searchMode)) {
+    window.searches = (window.searches || 0) + 1;
+    if (window.searches > 12) return res.status(429).json({ error: 'Too many web searches from this workspace. Try again in a few minutes.' });
+  }
   next();
 }
 
@@ -94,6 +101,18 @@ function sendEvent(res, event) {
   if (!res.writableEnded && !res.destroyed) res.write(`data: ${JSON.stringify(event)}\n\n`);
 }
 
+function startStream(res, model) {
+  if (res.headersSent) return;
+  res.status(200).set({
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  res.flushHeaders();
+  sendEvent(res, { type: 'start', model });
+}
+
 app.post('/api/chat', rateLimit, async (req, res) => {
   let timeout;
   const controller = new AbortController();
@@ -104,24 +123,35 @@ app.post('/api/chat', rateLimit, async (req, res) => {
     }
     const input = validateChat(req.body, Boolean(ollamaBaseUrl));
     const suppliedKey = req.get('x-aiflux-key')?.trim() || '';
-    if (suppliedKey.length > 512) throw new RequestError(400, 'Invalid API key.');
+    const suppliedSearchKey = req.get('x-aiflux-search-key')?.trim() || '';
+    if (suppliedKey.length > 512 || suppliedSearchKey.length > 512) throw new RequestError(400, 'Invalid API key.');
     const key = suppliedKey || envKeys[input.provider] || '';
-    const { url, options, format } = buildRequest(input, key, ollamaBaseUrl);
+    // Check the model connection before making any search calls.
+    let { url, options, format } = buildRequest(input, key, ollamaBaseUrl);
     timeout = setTimeout(() => controller.abort(new Error('timeout')), 120_000);
+    if (input.searchMode !== 'off') {
+      startStream(res, input.model);
+      sendEvent(res, { type: 'search', phase: 'planning' });
+      const query = await planWebSearch(input, key, ollamaBaseUrl, { signal: controller.signal });
+      if (query) {
+        sendEvent(res, { type: 'search', phase: 'searching', query });
+        const sources = await searchWeb(query, suppliedSearchKey || envSearchKey, { signal: controller.signal });
+        sendEvent(res, { type: 'sources', query, sources });
+        ({ url, options, format } = buildRequest(withSearchContext(input, query, sources), key, ollamaBaseUrl));
+      } else {
+        sendEvent(res, { type: 'search', phase: 'skipped' });
+        if (input.searchMode === 'always') {
+          ({ url, options, format } = buildRequest({ ...input, systemPrompt: `${SYSTEM_PROMPT}\n\nThe user requested live web search, but no safe query could be formed. No live search was performed. Do not imply that current information was verified.` }, key, ollamaBaseUrl));
+        }
+      }
+    }
     const upstream = await fetch(url, { ...options, signal: controller.signal });
     if (!upstream.ok) {
       const raw = await upstream.text();
       throw new RequestError(upstream.status >= 500 ? 502 : upstream.status, friendlyUpstreamError(upstream.status, raw, key));
     }
     if (!upstream.body) throw new RequestError(502, 'The provider returned an empty response.');
-    res.status(200).set({
-      'Content-Type': 'text/event-stream; charset=utf-8',
-      'Cache-Control': 'no-cache, no-transform',
-      Connection: 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    });
-    res.flushHeaders();
-    sendEvent(res, { type: 'start', model: input.model });
+    startStream(res, input.model);
     let usedModel = input.model;
     let hasText = false;
     const chunks = format === 'ollama' ? readLines(upstream.body) : readSSE(upstream.body);
