@@ -49,7 +49,43 @@ const ALLOWED_EDIT_EXT = /\.(html|css|js|jsx|ts|tsx|json|md|txt|py|svg|xml|sh|ya
 // Tool call parsing
 // ---------------------------------------------------------------------------
 
-// Strip fenced code blocks before scanning for <af-tool> invocations so the
+// Some providers (especially Groq/GPT-OSS) occasionally:
+//   (a) HTML-escape the angle brackets as &lt; / &gt; before streaming them,
+//   (b) emit the bare tool tag (<read_file>...</read_file>) instead of the
+//       documented <af-tool name="read_file"> wrapper.
+// We normalise both forms before parsing so tools still execute and don't
+// leak as literal XML to the user.
+const KNOWN_TOOL_TAGS = ['list_files', 'read_file', 'write_file', 'create_file', 'edit_file', 'delete_file', 'view_preview'];
+
+function decodeToolEntities(text: string): string {
+  return text
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&');
+}
+
+function normaliseToolBlocks(text: string): string {
+  // Wrap any bare <list_files …>…</list_files>, <read_file …/>, etc. into
+  // <af-tool name="…">…</af-tool> blocks so the main parser handles them.
+  let out = text;
+  for (const tag of KNOWN_TOOL_TAGS) {
+    // Self-closing shorthand: <read_file filename="x"/>
+    out = out.replace(
+      new RegExp(`<${tag}\\b([^>]*?)/>`, 'g'),
+      (_m, attrs) => `<af-tool name="${tag}"${attrs && attrs.trim() ? ` ${attrs.trim()}` : ''}></af-tool>`,
+    );
+    // Paired/attribute-only form: <read_file filename="x"></read_file>
+    out = out.replace(
+      new RegExp(`<${tag}\\b([^>]*)>([\\s\\S]*?)</${tag}>`, 'g'),
+      (_m, attrs, body) => `<af-tool name="${tag}"${attrs && attrs.trim() ? ` ${attrs.trim()}` : ''}>${body}</af-tool>`,
+    );
+  }
+  return out;
+}
+
+// Strip fenced code blocks before scanning for tool invocations so the
 // client doesn't execute sample/documentation blocks the model quotes inline.
 function withoutFencedCode(text: string): string {
   return text.replace(/```[\s\S]*?```/g, (block) => '`'.repeat(block.length));
@@ -57,7 +93,9 @@ function withoutFencedCode(text: string): string {
 
 export function extractToolCalls(text: string): ToolCall[] {
   const calls: ToolCall[] = [];
-  const scanTarget = withoutFencedCode(text);
+  const decoded = decodeToolEntities(text);
+  const normalised = normaliseToolBlocks(decoded);
+  const scanTarget = withoutFencedCode(normalised);
   const pattern = /<af-tool\b([^>]*)>([\s\S]*?)<\/af-tool>/g;
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(scanTarget)) !== null) {
@@ -84,13 +122,16 @@ export function extractToolCalls(text: string): ToolCall[] {
 }
 
 export function stripToolCalls(text: string): string {
-  const target = withoutFencedCode(text);
-  // Walk matches in the masked copy and delete same ranges in the original.
+  // Decode entities and wrap bare tags BEFORE stripping so escaped/bare tool
+  // calls don't leak as literal XML in the rendered message.
+  const decoded = decodeToolEntities(text);
+  const normalised = normaliseToolBlocks(decoded);
+  const masked = withoutFencedCode(normalised);
   const pattern = /<af-tool\b[^>]*>[\s\S]*?<\/af-tool>/g;
   const removals: Array<[number, number]> = [];
   let m: RegExpExecArray | null;
-  while ((m = pattern.exec(target)) !== null) removals.push([m.index, m.index + m[0].length]);
-  let out = text;
+  while ((m = pattern.exec(masked)) !== null) removals.push([m.index, m.index + m[0].length]);
+  let out = normalised;
   for (let i = removals.length - 1; i >= 0; i--) {
     const [start, end] = removals[i];
     out = out.slice(0, start) + out.slice(end);
