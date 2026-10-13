@@ -67,6 +67,7 @@ test('catalog favors curated coding models and excludes safety/utility endpoints
   const models = await getFreeOpenRouterModels(async () => ({ ok: true, json: async () => ({ data: [
     { id: 'qwen/coder:free', name: 'Coder (free)', description: 'Coding assistant', architecture: { output_modalities: ['text'] } },
     { id: 'poolside/laguna-s-2.1:free', name: 'Laguna S', description: 'Coding agent' },
+    { id: 'liquid/lfm-2.5-2.6b:free', name: 'LFM2.5', description: 'Advises against using it for agentic coding.' },
     { id: 'nvidia/nemotron-3.5-content-safety:free', name: 'Nemotron Content Safety', description: 'Classifies prompt and response safety' },
     { id: 'org/model:free', name: 'Prompt Guard', description: 'Checks inputs' },
     { id: 'org/other:free', name: 'Generic', description: 'Text embedding model' },
@@ -75,7 +76,8 @@ test('catalog favors curated coding models and excludes safety/utility endpoints
     { id: 'openrouter/free', name: 'Random router' },
     { id: 'openai/gpt-5', name: 'Paid' },
   ] }) }));
-  assert.deepEqual(models.map((model) => model.id), ['poolside/laguna-s-2.1:free', 'qwen/coder:free']);
+  assert.deepEqual(models.map((model) => model.id), ['poolside/laguna-s-2.1:free', 'qwen/coder:free', 'liquid/lfm-2.5-2.6b:free']);
   assert.equal(models[0].strength, 'Coding focused');
+  assert.equal(models[2].strength, 'OpenRouter free');
   assert.doesNotMatch(friendlyUpstreamError(401, '{"error":{"message":"bad secret"}}', 'secret'), /secret/);
 });
