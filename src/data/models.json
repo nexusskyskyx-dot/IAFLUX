@@ -1,0 +1,56 @@
+[
+  {
+    "id": "openrouter/free",
+    "provider": "openrouter",
+    "name": "Free model router",
+    "shortName": "Auto free",
+    "description": "Automatically routes each request to an available free model. A great place to start.",
+    "strength": "Best starting point",
+    "badge": "RECOMMENDED"
+  },
+  {
+    "id": "gemini-2.5-flash",
+    "provider": "gemini",
+    "name": "Gemini 2.5 Flash",
+    "shortName": "Gemini Flash",
+    "description": "A versatile Google model with a free API tier. Great for building and explaining code.",
+    "strength": "Everyday building",
+    "badge": "FREE TIER"
+  },
+  {
+    "id": "gemini-2.5-flash-lite",
+    "provider": "gemini",
+    "name": "Gemini 2.5 Flash-Lite",
+    "shortName": "Flash-Lite",
+    "description": "Google's lightweight option for quick questions and fast iterations.",
+    "strength": "Quick iterations",
+    "badge": "FREE TIER"
+  },
+  {
+    "id": "openai/gpt-oss-120b",
+    "provider": "groq",
+    "name": "GPT-OSS 120B",
+    "shortName": "GPT-OSS 120B",
+    "description": "A large open-weight reasoning model served at speed by Groq. Subject to Groq plan limits.",
+    "strength": "Deep reasoning",
+    "badge": "GROQ FREE PLAN"
+  },
+  {
+    "id": "qwen/qwen3.8-27b",
+    "provider": "groq",
+    "name": "Qwen 3.8 27B",
+    "shortName": "Qwen 3.8",
+    "description": "A capable open model for coding and reasoning, served with Groq’s low-latency inference.",
+    "strength": "Code & reasoning",
+    "badge": "GROQ FREE PLAN"
+  },
+  {
+    "id": "openai/gpt-oss-20b",
+    "provider": "groq",
+    "name": "GPT-OSS 20B",
+    "shortName": "GPT-OSS 20B",
+    "description": "A smaller, fast open-weight reasoning model for focused coding tasks.",
+    "strength": "Fast reasoning",
+    "badge": "GROQ FREE PLAN"
+  }
+]

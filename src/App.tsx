@@ -1,0 +1,278 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowDownToLine, Check, ChevronRight, Code2, KeyRound, Menu, PanelRightOpen } from 'lucide-react';
+import type { AppConfig, AttachedFile, ChatMessage, Conversation, Credentials, ModelInfo, Provider, WorkspaceFile } from './types';
+import { CURATED_MODELS, DEFAULT_MODEL } from './lib/models';
+import { createDraft, downloadConversation, extractCodeFiles, mergeGeneratedFiles, toProviderMessages } from './lib/files';
+import { loadActiveId, loadConversations, loadCredentials, loadModel, saveActiveId, saveConversations, saveCredentials, saveModel } from './lib/storage';
+import { requestChat } from './lib/chat';
+import { Brand } from './components/Brand';
+import Sidebar from './components/Sidebar';
+import ChatPanel from './components/ChatPanel';
+import Canvas from './components/Canvas';
+import ModelLibrary from './components/ModelLibrary';
+import SettingsModal from './components/SettingsModal';
+
+const emptyConfig: AppConfig = { configured: { openrouter: false, gemini: false, groq: false }, ollamaConfigured: false, requiresAccessCode: false };
+
+export default function App() {
+  const [initial] = useState(() => ({ chats: loadConversations(), activeId: loadActiveId() }));
+  const [chats, setChats] = useState<Conversation[]>(initial.chats);
+  const [activeId, setActiveId] = useState<string | null>(initial.chats.some((chat) => chat.id === initial.activeId) ? initial.activeId : null);
+  const [draftChat, setDraftChat] = useState(createDraft);
+  const [view, setView] = useState<'studio' | 'library'>('studio');
+  const [selectedModel, setSelectedModel] = useState<ModelInfo>(loadModel);
+  const [credentials, setCredentials] = useState<Credentials>(loadCredentials);
+  const [config, setConfig] = useState<AppConfig>(emptyConfig);
+  const [liveModels, setLiveModels] = useState<ModelInfo[]>([]);
+  const [ollamaModels, setOllamaModels] = useState<ModelInfo[]>([]);
+  const [catalogAvailable, setCatalogAvailable] = useState<boolean | null>(null);
+  const [sending, setSending] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsProvider, setSettingsProvider] = useState<Provider | undefined>();
+  const [contextFile, setContextFile] = useState<AttachedFile | null>(null);
+  const [canvasVisible, setCanvasVisible] = useState(true);
+  const [mobileCanvasOpen, setMobileCanvasOpen] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [toast, setToast] = useState('');
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const catalogLoading = useRef(false);
+  const catalogLoaded = useRef(false);
+  const abortRef = useRef<{ controller: AbortController; chatId: string } | null>(null);
+  const storageWarned = useRef(false);
+  const chatsRef = useRef(chats);
+  chatsRef.current = chats;
+
+  const activeChat = chats.find((chat) => chat.id === activeId) || draftChat;
+  const models = useMemo(() => {
+    const ids = new Set(CURATED_MODELS.map((model) => `${model.provider}:${model.id}`));
+    return [...CURATED_MODELS, ...[...liveModels, ...ollamaModels].filter((model) => !ids.has(`${model.provider}:${model.id}`))];
+  }, [liveModels, ollamaModels]);
+
+  const notify = useCallback((message: string) => {
+    setToast(message);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(''), 3800);
+  }, []);
+
+  useEffect(() => {
+    fetch('/api/config').then((response) => response.json()).then((result: AppConfig) => setConfig(result)).catch(() => notify('Could not load server configuration. Is the server running?'));
+  }, [notify]);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (!saveConversations(chats) && !storageWarned.current) {
+        storageWarned.current = true;
+        notify('Browser storage is full. Export your work to keep a copy.');
+      }
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [chats, notify]);
+  useEffect(() => { saveActiveId(activeId); }, [activeId]);
+  useEffect(() => {
+    const flush = () => { saveConversations(chatsRef.current); };
+    window.addEventListener('pagehide', flush);
+    return () => window.removeEventListener('pagehide', flush);
+  }, []);
+  useEffect(() => {
+    const newChatShortcut = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === 'o') {
+        event.preventDefault(); newChat();
+      }
+    };
+    window.addEventListener('keydown', newChatShortcut);
+    return () => window.removeEventListener('keydown', newChatShortcut);
+  });
+
+  const loadModels = useCallback(async (force = false) => {
+    if (catalogLoading.current || (!force && catalogLoaded.current)) return;
+    catalogLoading.current = true;
+    try {
+      const response = await fetch('/api/models');
+      if (!response.ok) throw new Error('Catalog unavailable');
+      const result = await response.json();
+      setLiveModels(Array.isArray(result.models) ? result.models : []);
+      setOllamaModels(Array.isArray(result.ollamaModels) ? result.ollamaModels : []);
+      setCatalogAvailable(Boolean(result.catalogAvailable));
+      catalogLoaded.current = true;
+    } catch {
+      setCatalogAvailable(false);
+      catalogLoaded.current = false;
+    } finally { catalogLoading.current = false; }
+  }, []);
+
+  const isConnected = useCallback((provider: Provider) => {
+    if (provider === 'ollama') return config.ollamaConfigured && ollamaModels.length > 0;
+    return Boolean(credentials.keys[provider] || config.configured[provider]);
+  }, [config, credentials, ollamaModels]);
+  const anyConnected = (['openrouter', 'gemini', 'groq', 'ollama'] as Provider[]).some(isConnected);
+
+  const openSettings = useCallback((provider?: Provider) => {
+    setSettingsProvider(provider);
+    setSettingsOpen(true);
+    setMobileSidebarOpen(false);
+  }, []);
+  const saveSettings = (next: Credentials) => {
+    setCredentials(next);
+    saveCredentials(next);
+    setSettingsOpen(false);
+    notify('Connections saved. Let’s make something.');
+  };
+  const chooseModel = (model: ModelInfo) => {
+    setSelectedModel(model);
+    saveModel(model);
+    if (view === 'library') { setView('studio'); notify(`${model.name} selected`); }
+  };
+  const changeView = (next: 'studio' | 'library') => {
+    setView(next);
+    setMobileSidebarOpen(false);
+    if (next === 'library') void loadModels();
+  };
+  const stop = () => { abortRef.current?.controller.abort(); };
+  const newChat = () => {
+    stop(); setActiveId(null); setDraftChat(createDraft()); setContextFile(null);
+    setView('studio'); setMobileSidebarOpen(false); setMobileCanvasOpen(false);
+  };
+  const selectChat = (id: string) => {
+    if (activeId !== id) stop();
+    setActiveId(id); setContextFile(null); setView('studio'); setMobileSidebarOpen(false); setMobileCanvasOpen(false);
+  };
+  const deleteChat = (id: string) => {
+    if (!window.confirm('Delete this conversation and its Canvas files? This cannot be undone.')) return;
+    if (abortRef.current?.chatId === id) stop();
+    setChats((previous) => previous.filter((chat) => chat.id !== id));
+    if (activeId === id) { setActiveId(null); setDraftChat(createDraft()); setContextFile(null); }
+    notify('Conversation deleted');
+  };
+  const updateActive = (updater: (chat: Conversation) => Conversation) => {
+    if (activeId) setChats((previous) => previous.map((chat) => chat.id === activeId ? updater(chat) : chat));
+    else setDraftChat((previous) => updater(previous));
+  };
+  const patchMessage = (chatId: string, messageId: string, updater: (message: ChatMessage) => ChatMessage) => {
+    setChats((previous) => previous.map((chat) => chat.id === chatId ? {
+      ...chat, updatedAt: Date.now(), messages: chat.messages.map((message) => message.id === messageId ? updater(message) : message),
+    } : chat));
+  };
+
+  const sendMessage = (text: string, attachments: AttachedFile[]): boolean => {
+    if (sending) return false;
+    if (!isConnected(selectedModel.provider)) {
+      openSettings(selectedModel.provider);
+      notify(selectedModel.provider === 'ollama' ? 'Set up Ollama on the server first.' : `Connect ${selectedModel.provider === 'gemini' ? 'Gemini' : selectedModel.provider === 'groq' ? 'Groq' : 'OpenRouter'} to start chatting.`);
+      return false;
+    }
+    if (config.requiresAccessCode && !credentials.accessCode) { openSettings(); notify('Enter your workspace access code first.'); return false; }
+    const now = Date.now();
+    const chatId = activeChat.id;
+    const userMessage: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: text, createdAt: now, attachments };
+    const assistantId = crypto.randomUUID();
+    const assistantMessage: ChatMessage = { id: assistantId, role: 'assistant', content: '', createdAt: now, status: 'streaming', model: selectedModel.name };
+    const history = toProviderMessages([...activeChat.messages, userMessage]);
+    if (history.reduce((sum, message) => sum + message.content.length, 0) > 180_000) { notify('This message is too long. Remove an attachment or shorten it.'); return false; }
+    const updated: Conversation = {
+      ...activeChat, title: activeChat.messages.length === 0 ? text.replace(/\s+/g, ' ').slice(0, 53) + (text.length > 53 ? '…' : '') : activeChat.title,
+      updatedAt: now, messages: [...activeChat.messages, userMessage, assistantMessage],
+    };
+    if (activeId) setChats((previous) => previous.map((chat) => chat.id === chatId ? updated : chat));
+    else { setChats((previous) => [updated, ...previous]); setActiveId(chatId); }
+    setSending(true);
+    const controller = new AbortController();
+    abortRef.current = { controller, chatId };
+    let responseText = '';
+    let actualModel = selectedModel.name;
+    void requestChat({
+      provider: selectedModel.provider,
+      model: selectedModel.id,
+      messages: history,
+      key: selectedModel.provider !== 'ollama' ? credentials.keys[selectedModel.provider] : '',
+      accessCode: credentials.accessCode,
+      signal: controller.signal,
+      onEvent: (event) => {
+        if (event.type === 'delta') {
+          responseText += event.text;
+          patchMessage(chatId, assistantId, (message) => ({ ...message, content: message.content + event.text }));
+        }
+        if (event.type === 'model' && event.model) {
+          actualModel = event.model.split('/').at(-1)?.replace(':free', '') || event.model;
+          patchMessage(chatId, assistantId, (message) => ({ ...message, model: actualModel }));
+        }
+      },
+    }).then(() => {
+      const text = responseText;
+      const count = extractCodeFiles(text, updated.files).length;
+      setChats((previous) => previous.map((chat) => {
+        if (chat.id !== chatId) return chat;
+        const generated = extractCodeFiles(text, chat.files);
+        const files = mergeGeneratedFiles(chat.files, generated);
+        return {
+          ...chat, updatedAt: Date.now(), files,
+          selectedFileId: generated[0]?.id || chat.selectedFileId,
+          messages: chat.messages.map((message) => message.id === assistantId ? { ...message, content: text, status: 'done', model: actualModel } : message),
+        };
+      }));
+      if (count) notify(`${count} ${count === 1 ? 'file' : 'files'} added to Canvas`);
+    }).catch((error: unknown) => {
+      const aborted = controller.signal.aborted;
+      const message = error instanceof Error ? error.message : 'Something went wrong.';
+      patchMessage(chatId, assistantId, (previous) => ({
+        ...previous, content: previous.content || (aborted ? 'Generation stopped.' : `**Could not generate a response.** ${message}`), status: 'error',
+      }));
+      if (!aborted) notify(message);
+    }).finally(() => {
+      if (abortRef.current?.controller === controller) { abortRef.current = null; setSending(false); }
+    });
+    return true;
+  };
+
+  const selectFile = (id: string) => updateActive((chat) => ({ ...chat, selectedFileId: id }));
+  const updateFile = (id: string, content: string) => updateActive((chat) => ({ ...chat, updatedAt: Date.now(), files: chat.files.map((file) => file.id === id ? { ...file, content, origin: 'user' } : file) }));
+  const createFile = (name: string, content = '') => {
+    const file: WorkspaceFile = { id: crypto.randomUUID(), name, content, origin: 'user' };
+    updateActive((chat) => ({ ...chat, updatedAt: Date.now(), files: [...chat.files, file], selectedFileId: file.id }));
+    notify(`${name} added to Canvas`);
+  };
+  const deleteFile = (id: string) => {
+    updateActive((chat) => {
+      const files = chat.files.filter((file) => file.id !== id);
+      return { ...chat, updatedAt: Date.now(), files, selectedFileId: chat.selectedFileId === id ? files[0]?.id || null : chat.selectedFileId };
+    });
+    notify('File deleted');
+  };
+  const addContext = (file: WorkspaceFile) => {
+    setContextFile({ name: file.name, content: file.content.slice(0, 30_000) });
+    if (file.content.length > 30_000) notify('The first 30 KB of this file was added to your next message.');
+    else notify(`${file.name} attached to your next message`);
+    setMobileCanvasOpen(false);
+    setView('studio');
+  };
+  const openSnippet = (content: string, info: string) => {
+    const existing = activeChat.files.find((file) => file.content.trim() === content.trim());
+    if (existing) selectFile(existing.id);
+    else {
+      const generated = extractCodeFiles(`\`\`\`${info}\n${content}\n\`\`\``, activeChat.files);
+      if (generated.length) updateActive((chat) => ({ ...chat, files: mergeGeneratedFiles(chat.files, generated), selectedFileId: generated[0].id, updatedAt: Date.now() }));
+    }
+    setView('studio');
+    setCanvasVisible(true);
+    if (window.matchMedia('(max-width: 1100px)').matches) setMobileCanvasOpen(true);
+  };
+  const toggleCanvas = () => {
+    if (window.matchMedia('(max-width: 1100px)').matches) setMobileCanvasOpen(true);
+    else setCanvasVisible((visible) => !visible);
+  };
+  const closeCanvas = () => {
+    if (window.matchMedia('(max-width: 1100px)').matches) setMobileCanvasOpen(false);
+    else setCanvasVisible(false);
+  };
+
+  return <div className={`app-shell ${canvasVisible ? '' : 'canvas-is-hidden'}`}>
+    {mobileSidebarOpen && <button className="mobile-scrim" aria-label="Close menu" onClick={() => setMobileSidebarOpen(false)} />}
+    <Sidebar chats={chats} activeId={activeId} view={view} connected={anyConnected} mobileOpen={mobileSidebarOpen} onCloseMobile={() => setMobileSidebarOpen(false)} onNew={newChat} onSelect={selectChat} onDelete={deleteChat} onView={changeView} onSettings={() => openSettings()} />
+    <main className="main-column">
+      <header className="topbar"><div className="topbar-left"><button className="icon-button mobile-menu-button" onClick={() => setMobileSidebarOpen(true)} aria-label="Open menu"><Menu size={21} /></button><span className="mobile-brand"><Brand /></span><div className="topbar-breadcrumb"><span>Workspace</span><ChevronRight size={15} /><strong>{view === 'library' ? 'Model library' : activeChat.messages.length ? activeChat.title : 'New conversation'}</strong></div></div><div className="topbar-actions"><button className={`topbar-connection ${anyConnected ? 'connected' : ''}`} onClick={() => openSettings()} title={anyConnected ? 'Manage AI connections' : 'Connect an AI model'} aria-label={anyConnected ? 'Manage AI connections' : 'Connect an AI model'}><span className="topbar-connection-dot" /> <span>{anyConnected ? 'Models connected' : 'Connect a model'}</span><KeyRound size={14} /></button>{view === 'studio' && activeChat.messages.length > 0 && <button className="topbar-action-button export-button" onClick={() => downloadConversation(activeChat)} title="Export conversation as Markdown"><ArrowDownToLine size={17} /><span>Export</span></button>}<span className="topbar-divider" /><button className={`topbar-canvas-button ${canvasVisible ? 'is-open' : ''}`} onClick={toggleCanvas}><Code2 size={17} /><span>Canvas</span>{!canvasVisible ? <PanelRightOpen size={15} /> : <span className="canvas-button-spark">✳</span>}</button><button className="topbar-avatar" onClick={() => openSettings()} aria-label="Open settings">AF</button></div></header>
+      {view === 'studio' ? <ChatPanel conversation={activeChat} selectedModel={selectedModel || DEFAULT_MODEL} models={models} catalogAvailable={catalogAvailable} connected={anyConnected} sending={sending} contextFile={contextFile} isConnected={isConnected} onSend={sendMessage} onStop={stop} onSelectModel={chooseModel} onLoadModels={() => void loadModels()} onLibrary={() => changeView('library')} onOpenSnippet={openSnippet} onClearContext={() => setContextFile(null)} onNotify={notify} onSettings={() => openSettings()} /> : <ModelLibrary models={models} selected={selectedModel} catalogAvailable={catalogAvailable} isConnected={isConnected} onSelect={chooseModel} onSettings={openSettings} onRefresh={() => void loadModels(true)} />}
+    </main>
+    {(canvasVisible || mobileCanvasOpen) && <Canvas conversation={activeChat} mobileOpen={mobileCanvasOpen} onClose={closeCanvas} onSelectFile={selectFile} onUpdateFile={updateFile} onCreateFile={createFile} onDeleteFile={deleteFile} onAddContext={addContext} onNotify={notify} />}
+    {mobileCanvasOpen && <button className="canvas-mobile-scrim" aria-label="Close Canvas" onClick={() => setMobileCanvasOpen(false)} />}
+    {settingsOpen && <SettingsModal credentials={credentials} config={config} focusProvider={settingsProvider} onSave={saveSettings} onClose={() => setSettingsOpen(false)} />}
+    {toast && <div className="toast" role="status"><span><Check size={15} /></span>{toast}</div>}
+  </div>;
+}
