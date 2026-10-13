@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ArrowRight, ArrowUpRight, Braces, Check, ChevronDown, Code2, Copy, FileCode2, Globe2, Lightbulb, Paperclip, Send, Sparkles, Square, WandSparkles, X } from 'lucide-react';
+import { ArrowRight, ArrowUpRight, Braces, Check, ChevronDown, Code2, Copy, Eye, FileCode2, FilePlus2, FolderOpen, Globe2, Lightbulb, Pencil, Square, Paperclip, Send, Sparkles, Trash2, WandSparkles, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { AttachedFile, ChatMessage, Conversation, ModelInfo, Provider, SearchMode } from '../types';
@@ -55,6 +55,38 @@ function MessageBody({ message, onOpenSnippet, onNotify }: { message: ChatMessag
     code: ({ children, className }) => <code className={className || 'inline-code'}>{children}</code>,
     a: ({ children, href }) => <a href={href} target="_blank" rel="noopener noreferrer">{children}<ArrowUpRight size={12} /></a>,
   }}>{message.content}</ReactMarkdown></div>;
+}
+
+function ToolCallBadges({ message }: { message: ChatMessage }) {
+  const calls = message.toolCalls || [];
+  if (!calls.length) return null;
+  const icon = (name: string) => {
+    switch (name) {
+      case 'list_files': return <FolderOpen size={13} />;
+      case 'read_file': return <FileCode2 size={13} />;
+      case 'write_file': return <FilePlus2 size={13} />;
+      case 'create_file': return <FilePlus2 size={13} />;
+      case 'edit_file': return <Pencil size={13} />;
+      case 'delete_file': return <Trash2 size={13} />;
+      case 'view_preview': return <Eye size={13} />;
+      default: return <Code2 size={13} />;
+    }
+  };
+  const label = (name: string) => ({
+    list_files: 'Listed files',
+    read_file: 'Read file',
+    write_file: 'Wrote file',
+    create_file: 'Created file',
+    edit_file: 'Edited file',
+    delete_file: 'Deleted file',
+    view_preview: 'Inspected preview',
+  } as Record<string, string>)[name] || name;
+  return <div className="message-tool-calls">
+    {calls.map((call, index) => <span key={`${call.id}-${index}`} className={`tool-call tool-call-${call.ok === false ? 'error' : 'ok'}`} title={call.note || ''}>
+      {icon(call.name)}<strong>{label(call.name)}</strong>
+      {call.args.filename || call.args.name ? <em>{call.args.filename || call.args.name}</em> : null}
+    </span>)}
+  </div>;
 }
 
 function SearchSources({ message }: { message: ChatMessage }) {
@@ -142,7 +174,10 @@ export default function ChatPanel(props: Props) {
         <div className="message-avatar">{message.role === 'assistant' ? <FluxMark size={29} /> : <span>YOU</span>}</div>
         <div className="message-main"><div className="message-byline"><strong>{message.role === 'assistant' ? 'AIFLUX' : 'You'}</strong><span>{message.role === 'assistant' ? message.model ? message.model.split('/').at(-1)?.replace(':free', '') : 'Coding partner' : new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>
           {message.role === 'assistant' && <SearchSources message={message} />}
-          {message.role === 'assistant' && !message.content && message.status === 'streaming' ? <div className="thinking-line"><span className="thinking-dots"><i /><i /><i /></span> {message.searchStatus ? 'Checking live sources...' : 'Putting thoughts into motion...'}</div> : message.content ? <MessageBody message={message} onOpenSnippet={props.onOpenSnippet} onNotify={props.onNotify} /> : null}
+          {message.role === 'assistant' && message.toolCalls?.length ? <ToolCallBadges message={message} /> : null}
+          {message.role === 'assistant' && !message.content && message.status === 'streaming' ? <div className="thinking-line"><span className="thinking-dots"><i /><i /><i /></span> {message.searchStatus ? 'Checking live sources...' : 'Putting thoughts into motion...'}</div>
+          : message.role === 'assistant' && message.status === 'tooling' && !message.content ? <div className="thinking-line"><span className="thinking-dots"><i /><i /><i /></span> Working on the Canvas…</div>
+          : message.content ? <MessageBody message={message} onOpenSnippet={props.onOpenSnippet} onNotify={props.onNotify} /> : null}
           {message.attachments?.length ? <div className="message-attachments">{message.attachments.map((file, index) => <span key={`${file.name}-${index}`}><FileCode2 size={13} />{file.name}</span>)}</div> : null}
           {message.status === 'error' && <div className="message-interrupted">Response interrupted. You can try sending your message again.</div>}
           {message.role === 'assistant' && message.content && message.status !== 'streaming' && <div className="message-actions"><button onClick={() => copyMessage(message)}>{copiedId === message.id ? <Check size={14} /> : <Copy size={14} />}{copiedId === message.id ? 'Copied' : 'Copy response'}</button></div>}

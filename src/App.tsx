@@ -2,10 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDownToLine, Check, ChevronRight, Code2, KeyRound, Menu, PanelRightOpen } from 'lucide-react';
 import type { AppConfig, AttachedFile, ChatMessage, Conversation, Credentials, ModelInfo, Provider, SearchMode, WorkspaceFile } from './types';
 import { CURATED_MODELS, DEFAULT_MODEL } from './lib/models';
-import { createDraft, downloadConversation, extractCodeFiles, mergeGeneratedFiles, toProviderMessages } from './lib/files';
+import { createDraft, downloadConversation, extractCodeFiles, mergeGeneratedFiles } from './lib/files';
 import { hasSavedModel, loadActiveId, loadConversations, loadCredentials, loadModel, loadSearchMode, saveActiveId, saveConversations, saveCredentials, saveModel, saveSearchMode } from './lib/storage';
 import { isUsableFreeCatalogModel } from './lib/model-policy.mjs';
 import { requestChat } from './lib/chat';
+import { buildProviderMessages, executeToolCall, extractToolCalls, formatToolResultMessage, injectWorkspaceSnapshot, MAX_TOOL_ROUNDS, stripToolCalls, type ToolResultMessage } from './lib/tool-use';
 import { Brand } from './components/Brand';
 import Sidebar from './components/Sidebar';
 import ChatPanel from './components/ChatPanel';
@@ -195,11 +196,12 @@ export default function App() {
     if (config.requiresAccessCode && !credentials.accessCode) { openSettings(); notify('Enter your workspace access code first.'); return false; }
     const now = Date.now();
     const chatId = activeChat.id;
+    const initialFiles = activeChat.files;
     const userMessage: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: text, createdAt: now, attachments };
     const assistantId = crypto.randomUUID();
-    const assistantMessage: ChatMessage = { id: assistantId, role: 'assistant', content: '', createdAt: now, status: 'streaming', model: selectedModel.name, ...(searchMode !== 'off' ? { searchStatus: 'planning' } : {}) };
-    const history = toProviderMessages([...activeChat.messages, userMessage]);
-    if (history.reduce((sum, message) => sum + message.content.length, 0) > 180_000) { notify('This message is too long. Remove an attachment or shorten it.'); return false; }
+    const assistantMessage: ChatMessage = { id: assistantId, role: 'assistant', content: '', createdAt: now, status: 'streaming', model: selectedModel.name, toolCalls: [], ...(searchMode !== 'off' ? { searchStatus: 'planning' } : {}) };
+    const firstPassHistory = buildProviderMessages([...activeChat.messages, userMessage], initialFiles);
+    if (firstPassHistory.reduce((sum, message) => sum + message.content.length, 0) > 180_000) { notify('This message is too long. Remove an attachment or shorten it.'); return false; }
     const updated: Conversation = {
       ...activeChat, title: activeChat.messages.length === 0 ? text.replace(/\s+/g, ' ').slice(0, 53) + (text.length > 53 ? '…' : '') : activeChat.title,
       updatedAt: now, messages: [...activeChat.messages, userMessage, assistantMessage],
@@ -207,63 +209,146 @@ export default function App() {
     if (activeId) setChats((previous) => previous.map((chat) => chat.id === chatId ? updated : chat));
     else { setChats((previous) => [updated, ...previous]); setActiveId(chatId); }
     setSending(true);
-    const controller = new AbortController();
-    abortRef.current = { controller, chatId };
-    let responseText = '';
-    let actualModel = selectedModel.name;
-    void requestChat({
-      provider: selectedModel.provider,
-      model: selectedModel.id,
-      messages: history,
-      key: selectedModel.provider !== 'ollama' ? credentials.keys[selectedModel.provider] : '',
-      searchKey: credentials.searchKey,
-      searchMode,
-      accessCode: credentials.accessCode,
-      signal: controller.signal,
-      onEvent: (event) => {
-        if (event.type === 'search') {
-          patchMessage(chatId, assistantId, (message) => ({ ...message,
-            searchStatus: event.phase === 'skipped' ? undefined : event.phase,
-            searchSkipped: event.phase === 'skipped',
-            searchQuery: event.query,
-          }));
+
+    const runTurn = async (params: {
+      messages: { role: 'user' | 'assistant'; content: string }[];
+      files: WorkspaceFile[];
+      selectedFileId: string | null;
+      roundsLeft: number;
+    }) => {
+      const controller = new AbortController();
+      abortRef.current = { controller, chatId };
+      let responseText = '';
+      let actualModel = selectedModel.name;
+      let searchDone = false;
+      let searchSkipped = false;
+      let searchInfo: ChatMessage['search'];
+      try {
+        await requestChat({
+          provider: selectedModel.provider,
+          model: selectedModel.id,
+          messages: params.messages,
+          key: selectedModel.provider !== 'ollama' ? credentials.keys[selectedModel.provider] : '',
+          searchKey: credentials.searchKey,
+          // Only run web search on the FIRST assistant turn of a user message;
+          // subsequent tool-loop turns should not re-trigger web searches.
+          searchMode: params.roundsLeft === MAX_TOOL_ROUNDS ? searchMode : 'off',
+          accessCode: credentials.accessCode,
+          signal: controller.signal,
+          onEvent: (event) => {
+            if (event.type === 'search') {
+              searchDone = true;
+              if (event.phase === 'skipped') searchSkipped = true;
+              patchMessage(chatId, assistantId, (message) => ({ ...message,
+                searchStatus: event.phase === 'skipped' ? undefined : event.phase,
+                searchSkipped: event.phase === 'skipped',
+                searchQuery: event.phase === 'skipped' ? undefined : event.query,
+              }));
+            }
+            if (event.type === 'sources') {
+              searchInfo = { query: event.query, sources: event.sources };
+              patchMessage(chatId, assistantId, (message) => ({ ...message, searchStatus: undefined, searchQuery: undefined, search: searchInfo }));
+            }
+            if (event.type === 'delta') {
+              responseText += event.text;
+              // Strip any <af-tool> blocks in-flight so the user sees prose, not raw XML.
+              const visible = stripToolCalls(responseText);
+              patchMessage(chatId, assistantId, (message) => ({ ...message, content: visible, status: 'streaming' }));
+            }
+            if (event.type === 'model' && event.model) {
+              actualModel = event.model.split('/').at(-1)?.replace(':free', '') || event.model;
+              patchMessage(chatId, assistantId, (message) => ({ ...message, model: actualModel }));
+            }
+          },
+        });
+      } catch (error) {
+        const aborted = controller.signal.aborted;
+        const message = error instanceof Error ? error.message : 'Something went wrong.';
+        patchMessage(chatId, assistantId, (previous) => ({
+          ...previous, content: previous.content || (aborted ? 'Generation stopped.' : `**Could not generate a response.** ${message}`),
+          status: 'error', searchStatus: undefined, searchQuery: undefined,
+        }));
+        if (!aborted) notify(message);
+        return;
+      }
+
+      // Parse and execute any <af-tool> calls the model emitted.
+      const calls = extractToolCalls(responseText);
+      if (calls.length && params.roundsLeft > 0) {
+        // Record the tool calls on the assistant message for UI display.
+        let workingFiles = params.files;
+        let workingSelected = params.selectedFileId;
+        const recordedCalls: NonNullable<ChatMessage['toolCalls']> = [];
+        const toolResults: ToolResultMessage[] = [];
+        patchMessage(chatId, assistantId, (message) => ({
+          ...message, content: stripToolCalls(responseText),
+          status: 'tooling', model: actualModel, toolCalls: [...(message.toolCalls || [])],
+        }));
+        for (const call of calls) {
+          const result = executeToolCall(call, { files: workingFiles, selectedFileId: workingSelected });
+          if (result.files) workingFiles = result.files;
+          if ('selectedFileId' in result && result.selectedFileId !== undefined) workingSelected = result.selectedFileId;
+          recordedCalls.push({ id: call.id, name: call.name, args: call.args, ok: result.ok, note: result.ok ? result.output.split('\n')[0] : result.output });
+          toolResults.push(formatToolResultMessage(result));
         }
-        if (event.type === 'sources') {
-          patchMessage(chatId, assistantId, (message) => ({ ...message, searchStatus: undefined, searchQuery: undefined,
-            search: { query: event.query, sources: event.sources } }));
-        }
-        if (event.type === 'delta') {
-          responseText += event.text;
-          patchMessage(chatId, assistantId, (message) => ({ ...message, content: message.content + event.text }));
-        }
-        if (event.type === 'model' && event.model) {
-          actualModel = event.model.split('/').at(-1)?.replace(':free', '') || event.model;
-          patchMessage(chatId, assistantId, (message) => ({ ...message, model: actualModel }));
-        }
-      },
-    }).then(() => {
-      const text = responseText;
-      const count = extractCodeFiles(text, updated.files).length;
+        // Persist file changes to the chat so the user sees them immediately.
+        setChats((previous) => previous.map((chat) => {
+          if (chat.id !== chatId) return chat;
+          return { ...chat, updatedAt: Date.now(), files: workingFiles, selectedFileId: workingSelected,
+            messages: chat.messages.map((message) => message.id === assistantId
+              ? { ...message, content: stripToolCalls(responseText), status: 'tooling', model: actualModel,
+                  searchStatus: undefined, searchQuery: undefined, ...(searchInfo ? { search: searchInfo } : searchDone ? { searchSkipped } : {}),
+                  toolCalls: [...(message.toolCalls || []), ...recordedCalls] }
+              : message),
+          };
+        }));
+        // Append tool-result messages and recurse. We append them after the
+        // assistant message so they feed into the next model call but do not
+        // render as user-visible bubbles.
+        const assistantHistoryEntry: { role: 'assistant'; content: string } = { role: 'assistant', content: responseText };
+        const nextMessagesBase = [...params.messages, assistantHistoryEntry];
+        // Append tool results as user-role messages (one per call) so the model
+        // can correlate by id. Then tack on the workspace snapshot on the last.
+        let nextMessages: { role: 'user' | 'assistant'; content: string }[] = nextMessagesBase;
+        for (const result of toolResults) nextMessages = [...nextMessages, { role: 'user', content: result.content }];
+        // Re-inject the workspace snapshot so it reflects post-tool state.
+        nextMessages = injectWorkspaceSnapshot(nextMessages, workingFiles);
+        return runTurn({ messages: nextMessages, files: workingFiles, selectedFileId: workingSelected, roundsLeft: params.roundsLeft - 1 });
+      }
+
+      // Final turn: no more tool calls. Persist files (legacy code-block
+      // extraction still applies to non-tool answers) and finalize.
+      const finalText = stripToolCalls(responseText);
       setChats((previous) => previous.map((chat) => {
         if (chat.id !== chatId) return chat;
-        const generated = extractCodeFiles(text, chat.files);
-        const files = mergeGeneratedFiles(chat.files, generated);
+        // Merge any legacy fenced-code files (e.g. older providers / fallback answers).
+        const generated = extractCodeFiles(finalText, params.files);
+        const files = mergeGeneratedFiles(params.files, generated);
         return {
           ...chat, updatedAt: Date.now(), files,
-          selectedFileId: generated[0]?.id || chat.selectedFileId,
-          messages: chat.messages.map((message) => message.id === assistantId ? { ...message, content: text, status: 'done', model: actualModel, searchStatus: undefined, searchQuery: undefined } : message),
+          selectedFileId: generated[0]?.id || params.selectedFileId,
+          messages: chat.messages.map((message) => message.id === assistantId
+            ? { ...message, content: finalText, status: 'done', model: actualModel,
+                searchStatus: undefined, searchQuery: undefined,
+                ...(searchInfo ? { search: searchInfo } : searchDone ? { searchSkipped } : {}) }
+            : message),
         };
       }));
-      if (count) notify(`${count} ${count === 1 ? 'file' : 'files'} added to Canvas`);
+      const legacyCount = extractCodeFiles(finalText, params.files).length;
+      if (legacyCount) notify(`${legacyCount} ${legacyCount === 1 ? 'file' : 'files'} added to Canvas`);
+    };
+
+    runTurn({
+      messages: firstPassHistory,
+      files: initialFiles,
+      selectedFileId: activeChat.selectedFileId,
+      roundsLeft: MAX_TOOL_ROUNDS,
     }).catch((error: unknown) => {
-      const aborted = controller.signal.aborted;
-      const message = error instanceof Error ? error.message : 'Something went wrong.';
-      patchMessage(chatId, assistantId, (previous) => ({
-        ...previous, content: previous.content || (aborted ? 'Generation stopped.' : `**Could not generate a response.** ${message}`), status: 'error', searchStatus: undefined, searchQuery: undefined,
-      }));
-      if (!aborted) notify(message);
+      const message = error instanceof Error ? error.message : 'Something went wrong running tools.';
+      patchMessage(chatId, assistantId, (previous) => ({ ...previous, status: 'error', content: previous.content || `**Could not finish.** ${message}` }));
+      notify(message);
     }).finally(() => {
-      if (abortRef.current?.controller === controller) { abortRef.current = null; setSending(false); }
+      if (abortRef.current?.chatId === chatId) { abortRef.current = null; setSending(false); }
     });
     return true;
   };

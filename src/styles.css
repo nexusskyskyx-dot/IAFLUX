@@ -430,3 +430,12 @@ a { color: inherit; }
 .editor-loading { height: 100%; display: flex; align-items: center; justify-content: center; gap: 9px; background: #101512; color: #90a78d; font: 10px 'JetBrains Mono', monospace; }.editor-loading svg { color: var(--lime); }
 
 .library-live button { display: grid; place-items: center; width: 24px; height: 24px; margin-left: 2px; border: 1px solid #344636; border-radius: 6px; background: #1b281e; color: #9ec294; }.library-live button:hover { color: var(--lime); border-color: #749869; }
+
+/* Tool-call badges in assistant messages */
+.message-tool-calls { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 6px; }
+.tool-call { display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px; border-radius: 999px; font-size: 11px; line-height: 1; border: 1px solid #3a5038; background: #1b271e; color: #bfe0ab; }
+.tool-call svg { flex: none; color: var(--lime); }
+.tool-call strong { font-weight: 600; letter-spacing: .01em; }
+.tool-call em { font-style: normal; color: #e9f5d8; font-family: 'JetBrains Mono', monospace; font-size: 10px; opacity: .85; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-call-error { border-color: #6a3838; background: #2a1c1c; color: #e9bebe; }
+.tool-call-error svg { color: #f09090; }

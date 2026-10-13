@@ -30,13 +30,14 @@ test('the central capability profile covers shipped features and keeps identity 
   assert.match(prompt, /^You are AIFLUX,/);
   assert.match(prompt, /user selected the Gemini model gemini-2\.5-flash for this reply/);
   for (const feature of AIFLUX_FEATURES) assert.ok(prompt.includes(`- ${feature}`), `Feature missing from prompt: ${feature}`);
-  assert.match(prompt, /Canvas turns named fenced code blocks into files/);
+  assert.match(prompt, /Canvas tools:/);
+  assert.match(prompt, /<af-tool /);
   assert.match(prompt, /HTML or SVG projects in a sandbox/);
-  assert.match(prompt, /attach text\/code files/);
+  assert.match(prompt, /attach up to three text\/code files/);
   assert.match(prompt, /local browser conversations/);
-  assert.match(prompt, /cannot directly edit an existing Canvas file/);
-  assert.match(prompt, /cannot.*run commands or tests, deploy code/);
-  assert.match(prompt, /```html filename="index\.html"/);
+  assert.match(prompt, /CAN read the Canvas, edit existing files/);
+  assert.match(prompt, /cannot deploy code.*fetch arbitrary URLs/);
+  assert.match(prompt, /filename="index\.html"/);
 });
 
 test('every provider includes the AIFLUX profile as a high-priority instruction on every turn', () => {

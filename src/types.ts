@@ -29,13 +29,14 @@ export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   createdAt: number;
-  status?: 'streaming' | 'done' | 'error';
+  status?: 'streaming' | 'done' | 'error' | 'tooling';
   model?: string;
   attachments?: AttachedFile[];
   search?: { query: string; sources: WebSource[] };
   searchSkipped?: boolean;
   searchStatus?: 'planning' | 'searching';
   searchQuery?: string;
+  toolCalls?: Array<{ id: string; name: string; args: Record<string, string>; ok?: boolean; note?: string }>;
 }
 
 export interface WorkspaceFile {

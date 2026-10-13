@@ -54,10 +54,14 @@ Every chat request sends a **server-owned system instruction** to the selected m
 ## What you can do
 
 - **Chat and code** with streamed answers, Markdown, optional live web search with source links, code blocks, model switching, copy actions, and a persistent local conversation history.
-- **Build in Canvas** using an editable syntax-highlighted CodeMirror editor. Named fenced code blocks (for example, one marked `html filename="index.html"`) from an AI answer become files automatically. Edited files are versioned rather than silently overwritten by a later answer.
-- **Preview safely**: HTML or SVG projects can be previewed in a sandboxed iframe. Separate `.css` and `.js` files are included in the preview; external network requests are blocked. This is a web preview, **not** an unrestricted code execution environment or a React/TypeScript compiler.
+- **AI-editable Canvas**: the assistant can directly list, read, create, overwrite, surgically edit (search-and-replace), delete, and re-order Canvas files using structured `<af-tool>` calls — no copy/paste needed. File changes land in the Canvas live as the model works. Tool activity is shown as inline badges on the assistant message.
+- **Build in Canvas** using an editable syntax-highlighted CodeMirror editor. Named fenced code blocks (for example, one marked `html filename="index.html"`) still work as a fallback, but the AI prefers the file tools for exact, idempotent edits. User edits are preserved as separate origins, and tools will not clobber unrelated changes.
+- **Preview the AI can see**: the assistant can call `view_preview` to inspect the assembled sandboxed HTML (all CSS/JS inlined, CSP applied) it is building, so it can verify layout, spot bugs, and iterate — exactly what you see in the Preview tab. This is the rendered source, **not** a screenshot of the visual pixels; you still see the live iframe in the Canvas.
+- **Preview safely** in a sandboxed iframe. Separate `.css` and `.js` files are included in the preview; external network requests are blocked. This is a web preview, **not** an unrestricted code execution environment or a React/TypeScript compiler.
 - **Bring context** by attaching up to three text/code files (30 KB each) or adding a Canvas file to your next message. Export the current file, download the whole Canvas as a ZIP, or export a conversation as Markdown.
 - **Keep control**: chats and code live in your browser's local storage; API keys aren't included in chat exports. Delete a conversation to remove its files from this browser.
+
+The Canvas tool loop is bounded (a handful of round-trips per user message) so the AI can read → edit → preview → fix a file without runaway requests, and you can stop generation at any time.
 
 ## Configuration and deployment
 

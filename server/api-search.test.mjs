@@ -57,7 +57,7 @@ test('search off goes straight to the selected provider with no search calls', a
   assert.equal(answer.contents[0].parts[0].text, 'What is the current React release?');
   assert.match(answer.systemInstruction.parts[0].text, /You are AIFLUX/);
   assert.match(answer.systemInstruction.parts[0].text, /Web mode: off.*No live search was performed/);
-  assert.match(answer.systemInstruction.parts[0].text, /Canvas turns named fenced code blocks into files/);
+  assert.match(answer.systemInstruction.parts[0].text, /Canvas tools:/);
 });
 
 test('auto mode lets the model skip unnecessary search and clearly reports it', async () => {
@@ -106,7 +106,7 @@ test('always mode calls Tavily keyless, passes attributed sources to the AI, and
   assert.equal(JSON.parse(calls[1].options.body).query, 'React stable release 2026');
   const answer = JSON.parse(calls[2].options.body);
   assert.match(answer.systemInstruction.parts[0].text, /You are AIFLUX/);
-  assert.match(answer.systemInstruction.parts[0].text, /Canvas turns named fenced code blocks into files/);
+  assert.match(answer.systemInstruction.parts[0].text, /Canvas tools:/);
   assert.match(answer.systemInstruction.parts[0].text, /The server ran a live web search/);
   assert.match(answer.systemInstruction.parts[0].text, /untrusted third-party data/);
   assert.match(answer.contents.at(-1).parts[0].text, /https:\/\/react.dev\/blog\/latest/);

@@ -43,7 +43,7 @@ export function likelyNeedsSearch(question) {
 
 export function buildSearchPlanRequest(input, key, ollamaBaseUrl, now = new Date()) {
   const prompt = `Today is ${now.toISOString().slice(0, 10)} UTC. Decide if a live web search would materially improve the answer to the user request below. Call web_search once with a focused query if current facts, documentation, releases, availability, or events matter. Otherwise reply exactly NO_SEARCH. Never include private code, credentials, file contents, or personal details in the query. Do not answer the user yet.\n\nUser request: ${JSON.stringify(latestQuestion(input))}`;
-  const plan = buildRequest({ ...input, messages: [{ role: 'user', content: prompt }], systemPrompt: 'You are AIFLUX, acting as its internal web search planner (not the user-facing answer). Either call web_search once or reply NO_SEARCH. Do not answer the user request.' }, key, ollamaBaseUrl);
+  const plan = buildRequest({ ...input, messages: [{ role: 'user', content: prompt }], systemPrompt: 'You are AIFLUX, acting as its internal web search planner (not the user-facing answer). Either call web_search once or reply NO_SEARCH. Canvas file tools are NOT available to you here. Do not answer the user request.' }, key, ollamaBaseUrl);
   const body = JSON.parse(plan.options.body);
   if (input.provider === 'gemini') {
     body.tools = [{ functionDeclarations: [{
