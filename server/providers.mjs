@@ -220,7 +220,9 @@ export async function getFreeOpenRouterModels(fetchImpl = fetch) {
       name: String(model.name || model.id).replace(/\s*\(free\)\s*$/i, '').slice(0, 80),
       shortName: String(model.name || model.id).replace(/\s*\(free\)\s*$/i, '').slice(0, 36),
       description: String(model.description || 'A currently available free model on OpenRouter.').slice(0, 200),
-      strength: /coder|coding|code|software.engineer|devstral|laguna|\bswe\b/i.test(`${model.id} ${model.name} ${model.description || ''}`) ? 'Coding focused' : 'OpenRouter free',
+      // Descriptions can mention coding negatively ("not suited for coding").
+      // Only label a model coding-focused when its actual ID or name says so.
+      strength: /coder|coding|code|software.engineer|devstral|laguna|\bswe\b/i.test(`${model.id} ${model.name}`) ? 'Coding focused' : 'OpenRouter free',
       badge: 'FREE MODEL',
       contextLength: Number(model.context_length) || undefined,
     }))
