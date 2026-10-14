@@ -68,6 +68,7 @@ export interface Credentials {
   accessCode: string;
   searchKey: string;
   remember: boolean;
+  autoSelectOnConnect: boolean;
 }
 
 export interface CatalogResponse {

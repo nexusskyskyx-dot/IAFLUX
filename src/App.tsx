@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDownToLine, Check, ChevronRight, Code2, KeyRound, Menu, PanelRightOpen } from 'lucide-react';
-import type { AppConfig, AttachedFile, ChatMessage, Conversation, Credentials, ModelInfo, Provider, SearchMode, WorkspaceFile } from './types';
-import { CURATED_MODELS, DEFAULT_MODEL, PROVIDERS } from './lib/models';
+import type { AppConfig, AttachedFile, ChatMessage, Conversation, Credentials, KeyProvider, ModelInfo, Provider, SearchMode, WorkspaceFile } from './types';
+import { CURATED_MODELS, DEFAULT_MODEL, PROVIDERS, recommendedModelForProvider } from './lib/models';
 import { createDraft, downloadConversation, extractCodeFiles, mergeGeneratedFiles, toProviderMessages } from './lib/files';
 import { hasSavedModel, loadActiveId, loadConversations, loadCredentials, loadModel, loadSearchMode, saveActiveId, saveConversations, saveCredentials, saveModel, saveSearchMode } from './lib/storage';
 import { isUsableFreeCatalogModel } from './lib/model-policy.mjs';
@@ -12,8 +12,11 @@ import ChatPanel from './components/ChatPanel';
 import Canvas from './components/Canvas';
 import ModelLibrary from './components/ModelLibrary';
 import SettingsModal from './components/SettingsModal';
+import GitHubContextModal from './components/GitHubContextModal';
 
 const emptyConfig: AppConfig = { configured: { openrouter: false, xkiro: false, gemini: false, groq: false }, ollamaConfigured: false, searchConfigured: false, requiresAccessCode: false };
+type DiscoverableProvider = 'gemini' | 'groq';
+type DiscoveryStatus = 'idle' | 'loading' | 'ready' | 'error';
 
 export default function App() {
   const [initial] = useState(() => ({ chats: loadConversations(), activeId: loadActiveId() }));
@@ -27,12 +30,15 @@ export default function App() {
   const [searchMode, setSearchMode] = useState<SearchMode>(loadSearchMode);
   const [config, setConfig] = useState<AppConfig>(emptyConfig);
   const [liveModels, setLiveModels] = useState<ModelInfo[]>([]);
+  const [providerModels, setProviderModels] = useState<Record<DiscoverableProvider, ModelInfo[]>>({ gemini: [], groq: [] });
+  const [providerDiscovery, setProviderDiscovery] = useState<Record<DiscoverableProvider, DiscoveryStatus>>({ gemini: 'idle', groq: 'idle' });
   const [xkiroModels, setXkiroModels] = useState<ModelInfo[]>([]);
   const [ollamaModels, setOllamaModels] = useState<ModelInfo[]>([]);
   const [catalogAvailable, setCatalogAvailable] = useState<boolean | null>(null);
   const [xkiroCatalogAvailable, setXkiroCatalogAvailable] = useState<boolean | null>(null);
   const [sending, setSending] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [githubOpen, setGithubOpen] = useState(false);
   const [settingsProvider, setSettingsProvider] = useState<Provider | undefined>();
   const [contextFile, setContextFile] = useState<AttachedFile | null>(null);
   const [canvasVisible, setCanvasVisible] = useState(true);
@@ -42,6 +48,9 @@ export default function App() {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const catalogLoading = useRef(false);
   const catalogLoaded = useRef(false);
+  const pendingAutoSelectProvider = useRef<KeyProvider | null>(null);
+  const providerDiscoveryIdentity = useRef<Record<DiscoverableProvider, string>>({ gemini: '', groq: '' });
+  const providerDiscoveryVersion = useRef<Record<DiscoverableProvider, number>>({ gemini: 0, groq: 0 });
   const abortRef = useRef<{ controller: AbortController; chatId: string } | null>(null);
   const storageWarned = useRef(false);
   const chatsRef = useRef(chats);
@@ -49,15 +58,23 @@ export default function App() {
 
   const activeChat = chats.find((chat) => chat.id === activeId) || draftChat;
   const models = useMemo(() => {
-    // Once the live catalog is available, do not advertise curated OpenRouter
-    // variants that are no longer listed as free.
     const freeModels = liveModels.filter(isUsableFreeCatalogModel);
-    const available = new Set(freeModels.map((model) => model.id));
-    const curated = CURATED_MODELS.filter((model) => model.provider !== 'openrouter' || catalogAvailable !== true || available.has(model.id));
+    const availableOpenRouter = new Set(freeModels.map((model) => model.id));
+    const dynamicModels = [...providerModels.gemini, ...providerModels.groq];
+    const dynamicById = new Map(dynamicModels.map((model) => [`${model.provider}:${model.id}`, model]));
+    const curated = CURATED_MODELS
+      .filter((model) => {
+        if (model.provider === 'openrouter' && catalogAvailable === true && !availableOpenRouter.has(model.id)) return false;
+        if ((model.provider === 'gemini' || model.provider === 'groq') && providerDiscovery[model.provider] === 'ready') {
+          return dynamicById.has(`${model.provider}:${model.id}`);
+        }
+        return true;
+      })
+      .map((model) => dynamicById.get(`${model.provider}:${model.id}`) || model);
     const ids = new Set(curated.map((model) => `${model.provider}:${model.id}`));
-    return [...curated, ...[...freeModels, ...xkiroModels, ...ollamaModels]
+    return [...curated, ...[...dynamicModels, ...freeModels, ...xkiroModels, ...ollamaModels]
       .filter((model) => !ids.has(`${model.provider}:${model.id}`))];
-  }, [catalogAvailable, liveModels, ollamaModels, xkiroModels]);
+  }, [catalogAvailable, liveModels, ollamaModels, providerDiscovery, providerModels, xkiroModels]);
   const freeCatalogAvailable = catalogAvailable === true || xkiroCatalogAvailable === true
     ? true
     : catalogAvailable === false && xkiroCatalogAvailable === false ? false : null;
@@ -67,9 +84,83 @@ export default function App() {
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(''), 3800);
   }, []);
+  const discoverProviderModels = useCallback(async (provider: DiscoverableProvider, key = '', force = false) => {
+    const identity = key ? `user:${key}` : 'workspace';
+    if (!force && providerDiscoveryIdentity.current[provider] === identity) return;
+    providerDiscoveryIdentity.current[provider] = identity;
+    const version = ++providerDiscoveryVersion.current[provider];
+    setProviderDiscovery((previous) => ({ ...previous, [provider]: 'loading' }));
+    setProviderModels((previous) => ({ ...previous, [provider]: [] }));
+    try {
+      const response = await fetch('/api/models/discover', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider, key }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(typeof result.error === 'string' ? result.error : 'Model discovery failed.');
+      if (version !== providerDiscoveryVersion.current[provider]) return;
+      const discovered = Array.isArray(result.models) ? result.models as ModelInfo[] : [];
+      setProviderModels((previous) => ({ ...previous, [provider]: discovered }));
+      setProviderDiscovery((previous) => ({ ...previous, [provider]: 'ready' }));
+    } catch {
+      if (version !== providerDiscoveryVersion.current[provider]) return;
+      setProviderModels((previous) => ({ ...previous, [provider]: [] }));
+      setProviderDiscovery((previous) => ({ ...previous, [provider]: 'error' }));
+    }
+  }, []);
+  const autoSelectProvider = useCallback((provider: KeyProvider) => {
+    if ((provider === 'gemini' || provider === 'groq') && providerDiscovery[provider] !== 'ready') {
+      pendingAutoSelectProvider.current = provider;
+      return undefined;
+    }
+    if (provider === 'xkiro' && xkiroCatalogAvailable === null) {
+      pendingAutoSelectProvider.current = provider;
+      return undefined;
+    }
+    const model = recommendedModelForProvider(provider, models);
+    if (!model) return undefined;
+    pendingAutoSelectProvider.current = null;
+    setManualSelection(true);
+    setSelectedModel(model);
+    saveModel(model);
+    return model;
+  }, [models, providerDiscovery, xkiroCatalogAvailable]);
+  useEffect(() => {
+    const provider = pendingAutoSelectProvider.current;
+    if (!provider || !credentials.autoSelectOnConnect) return;
+    if ((provider === 'gemini' || provider === 'groq') && providerDiscovery[provider] === 'error') {
+      pendingAutoSelectProvider.current = null;
+      notify(`${PROVIDERS[provider].name} key saved, but model discovery failed. Check the key, then choose or refresh models.`);
+      return;
+    }
+    if (provider === 'xkiro' && xkiroCatalogAvailable === false) {
+      pendingAutoSelectProvider.current = null;
+      notify('xKiro key saved, but its free model catalog is unavailable. Refresh or choose another provider.');
+      return;
+    }
+    const model = autoSelectProvider(provider);
+    if (model) notify(`Connected ${PROVIDERS[provider].name}; selected ${model.name}.`);
+    else if ((provider === 'gemini' || provider === 'groq') && providerDiscovery[provider] === 'ready') {
+      pendingAutoSelectProvider.current = null;
+      notify(`${PROVIDERS[provider].name} models were discovered. Only models with known free-tier picks are auto-selected; review pricing before choosing others.`);
+    } else if (provider === 'xkiro' && xkiroCatalogAvailable === true) {
+      pendingAutoSelectProvider.current = null;
+      notify('xKiro connected, but no recommended free model was found in its current catalog.');
+    }
+  }, [autoSelectProvider, credentials.autoSelectOnConnect, notify, providerDiscovery, xkiroCatalogAvailable]);
 
   useEffect(() => {
     fetch('/api/config').then((response) => response.json()).then((result: AppConfig) => setConfig(result)).catch(() => notify('Could not load server configuration. Is the server running?'));
+  }, [notify]);
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const result = url.searchParams.get('github');
+    if (!result) return;
+    url.searchParams.delete('github');
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+    if (result === 'connected') { setGithubOpen(true); notify('GitHub connected. Choose a repository to add read-only context.'); }
+    else if (result === 'cancelled') notify('GitHub sign-in was cancelled.');
   }, [notify]);
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -124,10 +215,27 @@ export default function App() {
 
   useEffect(() => { void loadModels(); }, [loadModels]);
   useEffect(() => {
-    if (manualSelection) return;
-    const preferred = models.find((model) => isConnected(model.provider)) ?? DEFAULT_MODEL;
+    for (const provider of ['gemini', 'groq'] as DiscoverableProvider[]) {
+      const key = credentials.keys[provider];
+      if (key || config.configured[provider]) void discoverProviderModels(provider, key);
+      else if (providerDiscoveryIdentity.current[provider]) {
+        providerDiscoveryIdentity.current[provider] = '';
+        providerDiscoveryVersion.current[provider] += 1;
+        setProviderModels((previous) => ({ ...previous, [provider]: [] }));
+        setProviderDiscovery((previous) => ({ ...previous, [provider]: 'idle' }));
+      }
+    }
+  }, [config.configured.gemini, config.configured.groq, credentials.keys.gemini, credentials.keys.groq, discoverProviderModels]);
+  useEffect(() => {
+    if (manualSelection || !credentials.autoSelectOnConnect) return;
+    const provider = (['xkiro', 'openrouter', 'gemini', 'groq', 'ollama'] as Provider[]).find(isConnected);
+    if (!provider) return;
+    if ((provider === 'gemini' || provider === 'groq') && providerDiscovery[provider] !== 'ready') return;
+    if (provider === 'xkiro' && xkiroCatalogAvailable === null) return;
+    const preferred = recommendedModelForProvider(provider, models);
+    if (!preferred) return;
     setSelectedModel((current) => current.id === preferred.id && current.provider === preferred.provider ? current : preferred);
-  }, [isConnected, manualSelection, models]);
+  }, [credentials.autoSelectOnConnect, isConnected, manualSelection, models, providerDiscovery, xkiroCatalogAvailable]);
   useEffect(() => {
     if (catalogAvailable !== true || selectedModel.provider !== 'openrouter' ||
         models.some((model) => model.provider === 'openrouter' && model.id === selectedModel.id)) return;
@@ -155,10 +263,27 @@ export default function App() {
     setMobileSidebarOpen(false);
   }, []);
   const saveSettings = (next: Credentials) => {
+    const newKeys = (Object.keys(next.keys) as KeyProvider[]).filter((provider) => !credentials.keys[provider] && Boolean(next.keys[provider]));
+    const providerToSelect = settingsProvider && newKeys.includes(settingsProvider as KeyProvider)
+      ? settingsProvider as KeyProvider
+      : newKeys[0];
     setCredentials(next);
     saveCredentials(next);
     setSettingsOpen(false);
-    notify('Connections saved. Let’s make something.');
+    if (providerToSelect === 'openrouter' || providerToSelect === 'xkiro') void loadModels(true);
+    if (next.autoSelectOnConnect && providerToSelect) {
+      if (providerToSelect === 'gemini' || providerToSelect === 'groq') {
+        pendingAutoSelectProvider.current = providerToSelect;
+        notify(`${PROVIDERS[providerToSelect].name} key saved. Discovering the models available to it…`);
+      } else {
+        const model = autoSelectProvider(providerToSelect);
+        notify(model
+          ? `Connected ${PROVIDERS[providerToSelect].name}; selected ${model.name}.`
+          : providerToSelect === 'xkiro' && xkiroCatalogAvailable === null
+            ? `${PROVIDERS[providerToSelect].name} key saved. Its model catalog is still loading.`
+            : `${PROVIDERS[providerToSelect].name} key saved. No recommended model is available yet.`);
+      }
+    } else notify('Connections saved. Let’s make something.');
   };
   const chooseModel = (model: ModelInfo) => {
     setManualSelection(true);
@@ -337,12 +462,13 @@ export default function App() {
         searchMode={searchMode} onCycleSearchMode={cycleSearchMode} isConnected={isConnected} onSend={sendMessage}
         onStop={stop} onSelectModel={chooseModel} onLoadModels={() => void loadModels()}
         onLibrary={() => changeView('library')} onOpenSnippet={openSnippet} onClearContext={() => setContextFile(null)}
-        onNotify={notify} onSettings={() => openSettings()} />
+        onNotify={notify} onSettings={() => openSettings()} onGitHub={() => setGithubOpen(true)} />
         : <ModelLibrary models={models} selected={selectedModel} catalogAvailable={freeCatalogAvailable} isConnected={isConnected} onSelect={chooseModel} onSettings={openSettings} onRefresh={() => void loadModels(true)} />}
     </main>
     {(canvasVisible || mobileCanvasOpen) && <Canvas conversation={activeChat} mobileOpen={mobileCanvasOpen} onClose={closeCanvas} onSelectFile={selectFile} onUpdateFile={updateFile} onCreateFile={createFile} onDeleteFile={deleteFile} onAddContext={addContext} onNotify={notify} />}
     {mobileCanvasOpen && <button className="canvas-mobile-scrim" aria-label="Close Canvas" onClick={() => setMobileCanvasOpen(false)} />}
     {settingsOpen && <SettingsModal credentials={credentials} config={config} focusProvider={settingsProvider} onSave={saveSettings} onClose={() => setSettingsOpen(false)} />}
+    {githubOpen && <GitHubContextModal onClose={() => setGithubOpen(false)} onUseContext={(file) => { setContextFile(file); setGithubOpen(false); notify(`${file.name} added as context for your next message.`); }} onNotify={notify} />}
     {toast && <div className="toast" role="status"><span><Check size={15} /></span>{toast}</div>}
   </div>;
 }

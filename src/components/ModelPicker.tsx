@@ -29,7 +29,7 @@ export default function ModelPicker({ models, selected, isConnected, onSelect, o
   const filtered = models.filter((model) => `${model.name} ${model.id} ${model.strength}`.toLowerCase().includes(search.toLowerCase()));
   return <div className="model-picker" ref={ref} role="dialog" aria-label="Choose an AI model">
     <div className="model-picker-header"><span>CHOOSE YOUR MODEL</span><button className="subtle-icon" onClick={onClose} aria-label="Close model picker"><X size={16} /></button></div>
-    <div className="model-picker-search"><Search size={16} /><input ref={inputRef} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search free models..." aria-label="Search models" /><span>ESC</span></div>
+    <div className="model-picker-search"><Search size={16} /><input ref={inputRef} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search available models..." aria-label="Search models" /><span>ESC</span></div>
     <div className="model-picker-scroll">
       {filtered.length ? groupModels(filtered).map(({ provider, models: items }) => <div key={provider} className="picker-group">
         <div className="picker-group-title">{PROVIDERS[provider].name}<span>{items.length}</span></div>

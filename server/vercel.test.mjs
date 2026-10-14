@@ -3,12 +3,18 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import configHandler from '../api/config.js';
 import chatHandler from '../api/chat.js';
+import githubHandler from '../api/github.js';
+import githubReposHandler from '../api/github/repos.js';
+import discoverModelsHandler from '../api/models/discover.js';
 
 // Exercise the same entrypoints Vercel invokes, without relying on Vercel credentials.
 test('Vercel functions route to the shared API instead of returning SPA HTML', async () => {
   const server = createServer((req, res) => {
     if (req.url?.startsWith('/api/config')) return configHandler(req, res);
+    if (req.url?.startsWith('/api/models/discover')) return discoverModelsHandler(req, res);
     if (req.url?.startsWith('/api/chat')) return chatHandler(req, res);
+    if (req.url?.startsWith('/api/github/repos')) return githubReposHandler(req, res);
+    if (req.url?.startsWith('/api/github')) return githubHandler(req, res);
     res.writeHead(404).end();
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -21,6 +27,16 @@ test('Vercel functions route to the shared API instead of returning SPA HTML', a
     assert.equal(typeof config.configured.openrouter, 'boolean');
     assert.equal(typeof config.configured.xkiro, 'boolean');
     assert.equal(typeof config.searchConfigured, 'boolean');
+    const invalidDiscovery = await fetch(`${base}/api/models/discover`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: 'ollama', key: 'not-a-provider-key' }),
+    });
+    assert.equal(invalidDiscovery.status, 400);
+    const github = await fetch(`${base}/api/github?op=status`);
+    assert.equal(github.status, 200);
+    assert.match(github.headers.get('content-type'), /application\/json/);
+    assert.equal(typeof (await github.json()).configured, 'boolean');
+    const githubRepos = await fetch(`${base}/api/github/repos`);
+    assert.equal(githubRepos.status, 401);
     const denied = await fetch(`${base}/api/chat`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ provider: 'openrouter', model: 'openai/paid', messages: [{ role: 'user', content: 'hi' }] }),

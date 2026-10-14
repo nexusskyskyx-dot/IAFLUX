@@ -76,7 +76,7 @@ export function saveSearchMode(mode: SearchMode) {
 }
 
 export function loadCredentials(): Credentials {
-  const empty: Credentials = { keys: { openrouter: '', xkiro: '', gemini: '', groq: '' }, accessCode: '', searchKey: '', remember: false };
+  const empty: Credentials = { keys: { openrouter: '', xkiro: '', gemini: '', groq: '' }, accessCode: '', searchKey: '', remember: false, autoSelectOnConnect: true };
   try {
     const persistent = localStorage.getItem(CREDS_KEY);
     const raw = persistent || sessionStorage.getItem(CREDS_KEY);
@@ -92,6 +92,7 @@ export function loadCredentials(): Credentials {
       accessCode: String(parsed.accessCode || ''),
       searchKey: String(parsed.searchKey || ''),
       remember: Boolean(persistent),
+      autoSelectOnConnect: parsed.autoSelectOnConnect !== false,
     };
   } catch { return empty; }
 }

@@ -5,8 +5,10 @@ import { timingSafeEqual } from 'node:crypto';
 import {
   RequestError, validateChat, buildRequest, friendlyUpstreamError,
   readSSE, readLines, extractChunk, getFreeOpenRouterModels, getFreeXkiroModels,
+  getGeminiModels, getGroqModels,
 } from './providers.mjs';
 import { planWebSearch, searchWeb, withSearchContext } from './search.mjs';
+import { createGitHubRouter } from './github.mjs';
 
 const app = express();
 const ollamaBaseUrl = process.env.OLLAMA_BASE_URL?.trim() || '';
@@ -31,6 +33,7 @@ app.use('/api', (_req, res, next) => {
   res.setHeader('Cache-Control', 'no-store');
   next();
 });
+app.use('/api/github', createGitHubRouter());
 
 app.get('/api/config', (_req, res) => {
   res.json({
@@ -83,6 +86,36 @@ app.get('/api/models', async (_req, res) => {
     } catch { /* Ollama may not be running yet. */ }
   }
   res.json({ models, xkiroModels, ollamaModels, catalogAvailable, xkiroCatalogAvailable: xkiroCatalog.available });
+});
+
+const discoveryLimits = new Map();
+app.post('/api/models/discover', async (req, res) => {
+  const { provider } = req.body || {};
+  if (!['gemini', 'groq'].includes(provider)) return res.status(400).json({ error: 'Choose Gemini or Groq model discovery.' });
+  const suppliedKey = typeof req.body.key === 'string' ? req.body.key.trim() : '';
+  if (suppliedKey.length > 500) return res.status(400).json({ error: 'The provider key is too long.' });
+  const key = suppliedKey || envKeys[provider];
+  if (!key) return res.status(401).json({ error: `Connect your ${provider === 'gemini' ? 'Gemini' : 'Groq'} API key to discover models.` });
+  const address = req.ip || 'unknown';
+  const now = Date.now();
+  const previous = discoveryLimits.get(address);
+  const window = previous && now - previous.start < 10 * 60_000 ? previous : { start: now, count: 0 };
+  window.count += 1;
+  discoveryLimits.set(address, window);
+  if (discoveryLimits.size > 1000) {
+    for (const [ip, value] of discoveryLimits) if (now - value.start > 10 * 60_000) discoveryLimits.delete(ip);
+  }
+  if (window.count > 20) return res.status(429).json({ error: 'Too many model discovery requests. Try again in a few minutes.' });
+  try {
+    const discoveryOptions = { includeUncurated: Boolean(suppliedKey) };
+    const models = provider === 'gemini'
+      ? await getGeminiModels(key, fetch, discoveryOptions)
+      : await getGroqModels(key, fetch, discoveryOptions);
+    return res.json({ provider, models });
+  } catch (error) {
+    return res.status(error instanceof RequestError ? Math.min(error.status, 599) : 502)
+      .json({ error: error instanceof RequestError ? error.message : 'Could not discover provider models. Try again.' });
+  }
 });
 
 const limits = new Map();
@@ -144,10 +177,10 @@ app.post('/api/chat', rateLimit, async (req, res) => {
       }
       xkiroFreeModelIds = new Set(xkiroCatalog.models.map((model) => model.id));
     }
-    const input = validateChat(req.body, Boolean(ollamaBaseUrl), xkiroFreeModelIds);
     const suppliedKey = req.get('x-aiflux-key')?.trim() || '';
     const suppliedSearchKey = req.get('x-aiflux-search-key')?.trim() || '';
     if (suppliedKey.length > 512 || suppliedSearchKey.length > 512) throw new RequestError(400, 'Invalid API key.');
+    const input = validateChat(req.body, Boolean(ollamaBaseUrl), xkiroFreeModelIds, Boolean(suppliedKey));
     const key = suppliedKey || envKeys[input.provider] || '';
     // Check the model connection before making any search calls.
     let { url, options, format } = buildRequest(input, key, ollamaBaseUrl);

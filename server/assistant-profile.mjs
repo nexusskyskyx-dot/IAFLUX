@@ -5,7 +5,7 @@ export const AIFLUX_FEATURES = Object.freeze([
   'Chat about ideas and code: explain, debug, design, and generate complete code with streamed Markdown answers.',
   'Canvas turns named fenced code blocks into files the user can edit; later answers version files instead of silently overwriting user edits.',
   'The user can preview HTML or SVG projects in a sandbox, including separate CSS and JavaScript files. It is not a React/TypeScript compiler or unrestricted code runner.',
-  'The user can attach text/code files or add a Canvas file to a message. You can read a file only when its contents are actually supplied in chat.',
+  'The user can attach local text/code files, add a Canvas file, or explicitly add a read-only GitHub repository file, issue, or pull request to a message. You can read only the contents actually supplied in chat; no repository access is implied otherwise.',
   'Optional live web search is controlled by the Web button (Off, Auto, Always). When a search succeeds, source links appear with the answer; only cite results actually supplied for this request.',
   'The user can choose an AI model, connect provider keys in Settings, keep local browser conversations and Canvas files, export a chat, and download files or a Canvas ZIP.',
 ]);

@@ -20,7 +20,7 @@ export class RequestError extends Error {
   }
 }
 
-export function validateChat(body, ollamaConfigured = false, xkiroFreeModelIds = new Set()) {
+export function validateChat(body, ollamaConfigured = false, xkiroFreeModelIds = new Set(), allowUserKeyModels = false) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     throw new RequestError(400, 'Invalid request.');
   }
@@ -46,8 +46,9 @@ export function validateChat(body, ollamaConfigured = false, xkiroFreeModelIds =
   if (provider === 'xkiro' && !(xkiroFreeModelIds instanceof Set && xkiroFreeModelIds.has(model))) {
     throw new RequestError(400, 'Choose a model currently listed as free in xKiro’s live chat catalog.');
   }
-  if (['gemini', 'groq'].includes(provider) && !catalog.some((entry) => entry.provider === provider && entry.id === model)) {
-    throw new RequestError(400, 'This model is not in the supported free-tier catalog.');
+  if (['gemini', 'groq'].includes(provider) && !catalog.some((entry) => entry.provider === provider && entry.id === model) &&
+      !(allowUserKeyModels && /^[a-zA-Z0-9._:/-]{1,180}$/.test(model))) {
+    throw new RequestError(400, 'Choose a model from the provider catalog discovered for your API key.');
   }
   if (provider === 'ollama' && (!ollamaConfigured || !/^[a-zA-Z0-9._:/-]{1,160}$/.test(model))) {
     throw new RequestError(400, 'Connect Ollama on the server and choose an installed model.');
@@ -265,6 +266,82 @@ export async function getFreeXkiroModels(fetchImpl = fetch) {
       };
     })
     .sort((a, b) => Number(b.strength === 'Coding focused') - Number(a.strength === 'Coding focused') || a.name.localeCompare(b.name));
+}
+
+const DISCOVERED_MODEL_ID = /^[a-zA-Z0-9._:/-]{1,180}$/;
+
+function discoveredModel(provider, id, displayName, description, contextLength, includeUncurated = true) {
+  if (!DISCOVERED_MODEL_ID.test(id) || isNonChatModelId(id)) return null;
+  const curatedModel = catalog.find((model) => model.provider === provider && model.id === id);
+  if (!includeUncurated && !curatedModel) return null;
+  const name = String(displayName || id).slice(0, 100);
+  const strength = curatedModel?.strength || (/coder|coding|code|software.engineer|devstral|swe/i.test(`${id} ${name}`) ? 'Coding focused' : 'Available model');
+  return {
+    id,
+    provider,
+    name,
+    shortName: String(curatedModel?.shortName || name).slice(0, 36),
+    description: curatedModel?.description || `${String(description || 'Discovered from your provider key.').slice(0, 160)} Check provider pricing and account limits before selecting; usage may incur charges.`,
+    strength,
+    badge: curatedModel?.badge || 'CHECK PRICING',
+    contextLength: Number(contextLength) || curatedModel?.contextLength,
+  };
+}
+
+export async function getGeminiModels(key, fetchImpl = fetch, { includeUncurated = true } = {}) {
+  if (typeof key !== 'string' || !key.trim() || key.length > 500) throw new RequestError(400, 'Enter a valid Gemini API key to discover models.');
+  const discovered = new Map();
+  let pageToken = '';
+  for (let page = 0; page < 5; page += 1) {
+    const url = new URL('https://generativelanguage.googleapis.com/v1beta/models');
+    url.searchParams.set('pageSize', '100');
+    if (pageToken) url.searchParams.set('pageToken', pageToken);
+    let response;
+    try {
+      response = await fetchImpl(url, { headers: { 'x-goog-api-key': key.trim() }, signal: AbortSignal.timeout(9000) });
+    } catch { throw new RequestError(502, 'Could not reach Google Gemini model discovery. Try again.'); }
+    if (!response.ok) throw new RequestError(response.status === 401 || response.status === 403 ? 401 : 502, 'Gemini model discovery failed. Check the API key and try again.');
+    const json = await response.json().catch(() => ({}));
+    if (!Array.isArray(json.models)) throw new RequestError(502, 'Gemini returned an invalid model catalog.');
+    for (const model of json.models) {
+      const fullName = typeof model.name === 'string' ? model.name : '';
+      const id = fullName.replace(/^models\//, '');
+      const methods = Array.isArray(model.supportedGenerationMethods) ? model.supportedGenerationMethods : [];
+      if (!methods.some((method) => ['generateContent', 'streamGenerateContent'].includes(method))) continue;
+      const result = discoveredModel('gemini', id, model.displayName, model.description, model.inputTokenLimit, includeUncurated);
+      if (result) discovered.set(result.id, result);
+    }
+    pageToken = typeof json.nextPageToken === 'string' ? json.nextPageToken : '';
+    if (!pageToken) break;
+  }
+  return [...discovered.values()].sort((a, b) =>
+    Number(a.badge === 'CHECK PRICING') - Number(b.badge === 'CHECK PRICING') ||
+    Number(b.badge.startsWith('BEST')) - Number(a.badge.startsWith('BEST')) ||
+    Number(b.strength === 'Coding focused') - Number(a.strength === 'Coding focused') || a.name.localeCompare(b.name));
+}
+
+export async function getGroqModels(key, fetchImpl = fetch, { includeUncurated = true } = {}) {
+  if (typeof key !== 'string' || !key.trim() || key.length > 500) throw new RequestError(400, 'Enter a valid Groq API key to discover models.');
+  let response;
+  try {
+    response = await fetchImpl('https://api.groq.com/openai/v1/models', {
+      headers: { Authorization: `Bearer ${key.trim()}` },
+      signal: AbortSignal.timeout(9000),
+    });
+  } catch { throw new RequestError(502, 'Could not reach Groq model discovery. Try again.'); }
+  if (!response.ok) throw new RequestError(response.status === 401 || response.status === 403 ? 401 : 502, 'Groq model discovery failed. Check the API key and try again.');
+  const json = await response.json().catch(() => ({}));
+  if (!Array.isArray(json.data)) throw new RequestError(502, 'Groq returned an invalid model catalog.');
+  const discovered = new Map();
+  for (const model of json.data) {
+    if (model.active === false || model.status === 'inactive' || typeof model.id !== 'string') continue;
+    const result = discoveredModel('groq', model.id, model.name || model.id, model.description, model.context_window || model.context_length, includeUncurated);
+    if (result) discovered.set(result.id, result);
+  }
+  return [...discovered.values()].sort((a, b) =>
+    Number(a.badge === 'CHECK PRICING') - Number(b.badge === 'CHECK PRICING') ||
+    Number(b.badge.startsWith('BEST')) - Number(a.badge.startsWith('BEST')) ||
+    Number(b.strength === 'Coding focused') - Number(a.strength === 'Coding focused') || a.name.localeCompare(b.name));
 }
 
 export async function getFreeOpenRouterModels(fetchImpl = fetch) {

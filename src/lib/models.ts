@@ -41,3 +41,11 @@ export function groupModels(models: ModelInfo[]): { provider: Provider; models: 
     .map((provider) => ({ provider, models: models.filter((model) => model.provider === provider) }))
     .filter((group) => group.models.length > 0);
 }
+
+export function recommendedModelForProvider(provider: Provider, models: ModelInfo[]): ModelInfo | undefined {
+  const available = models.filter((model) => model.provider === provider);
+  const noKnownPrice = available.filter((model) => model.badge !== 'CHECK PRICING');
+  return noKnownPrice.find((model) => model.badge.startsWith('BEST')) ||
+    noKnownPrice.find((model) => /coding|software.engineering|code/i.test(model.strength)) ||
+    noKnownPrice[0];
+}

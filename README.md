@@ -28,15 +28,15 @@ npm test          # provider and workspace tests
 | --- | --- | --- |
 | **OpenRouter** | **Poolside Laguna S 2.1** (coding specialist), **Cohere North Mini Code** (fast coding), Laguna XS, Inkling, Nemotron 3 Ultra, and live-discovered `:free` chat models | Create a free API key at [OpenRouter](https://openrouter.ai/keys); add it in Settings or use `OPENROUTER_API_KEY`. |
 | **xKiro** | Every currently free chat model from its live catalog, including coding and general models; models without a `:free` suffix are included | Create a key at the [xKiro API Keys page](https://xkiro.com/dashboard/api/keys); add it in Settings or use `XKIRO_API_KEY`. Free models draw from a daily token allowance. |
-| **Google Gemini** | **Gemini 3.8 Flash** (overall recommendation for software engineering), 2.5 Flash, 2.5 Flash-Lite | Create a key in [Google AI Studio](https://aistudio.google.com/apikey); add it in Settings or use `GEMINI_API_KEY`. |
-| **Groq** | GPT-OSS 120B, Qwen 3.8 27B, GPT-OSS 20B | Create a key in [GroqCloud](https://console.groq.com/keys); add it in Settings or use `GROQ_API_KEY`. |
+| **Google Gemini** | **Gemini 3.8 Flash** (overall recommendation for software engineering), 2.5 Flash, 2.5 Flash-Lite; a personal key discovers additional models available to that key | Create a key in [Google AI Studio](https://aistudio.google.com/apikey); add it in Settings or use `GEMINI_API_KEY`. |
+| **Groq** | GPT-OSS 120B, Qwen 3.8 27B, GPT-OSS 20B; a personal key discovers additional models available to that key | Create a key in [GroqCloud](https://console.groq.com/keys); add it in Settings or use `GROQ_API_KEY`. |
 | **Ollama** | Your installed local conversational models, discovered from `/api/tags` | Run [Ollama](https://github.com/ollama/ollama) on the **same host as the AIFLUX server**, set `OLLAMA_BASE_URL=http://127.0.0.1:11434`, pull a model, and refresh the model library. No cloud API key required. |
 
 **xKiro's free list stays live.** AIFLUX reads xKiro's public [model catalog](https://api.xkiro.com/v1/models) and only includes entries marked `modality: chat` and `access_tier: free` with zero input/output token prices (and no nonzero cache prices). The free list is not hardcoded or determined by an ID suffix; refresh the library to discover additions. If AIFLUX cannot verify the current catalog, xKiro chat requests fail closed rather than risk routing to a paid model. xKiro's [pricing guide](https://docs.xkiro.com/guides/pricing/) says free models have a daily token allowance, so free access is capped—not unlimited.
 
 **Why no “Auto free”?** OpenRouter's [`openrouter/free` router](https://openrouter.ai/docs/guides/routing/routers/free-router) picks a random free model; its catalog also includes [content-safety classifiers](https://openrouter.ai/nvidia/nemotron-3.5-content-safety:free) that answer with labels such as “User Safety: safe” instead of code. AIFLUX now rejects the random router and recognizable non-chat model IDs, filters moderation/embedding/reranking endpoints out of live discovery using model metadata, and stops a stream if the provider reports a safety/utility model. Older saved Auto-free selections are cleared automatically. Existing chat transcripts are not rewritten: if an earlier answer contains safety labels, resend your prompt with a named coding model. An unlabelled or misleading third-party endpoint cannot be guaranteed to behave like a coding model.
 
-**Which model to pick?** [Gemini 3.8 Flash](https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash) is our overall recommendation for software-engineering tasks on a [Google free API tier](https://ai.google.dev/gemini-api/docs/pricing). If you use OpenRouter, start with [Poolside Laguna S 2.1](https://openrouter.ai/poolside/laguna-s-2.1:free), a coding-agent model with 262K context, or [Cohere North Mini Code](https://openrouter.ai/cohere/north-mini-code:free) for quicker iterations. AIFLUX prioritizes a model from a connected provider, respects your manual selection, and removes OpenRouter picks that disappear from the live free catalog. If discovery is unavailable, the curated picks remain visible, but provider availability must be checked at request time. Groq publishes [model IDs](https://console.groq.com/docs/models) and [plan rate limits](https://console.groq.com/docs/rate-limits).
+**Which model to pick?** [Gemini 3.8 Flash](https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash) is our overall recommendation for software-engineering tasks on a [Google free API tier](https://ai.google.dev/gemini-api/docs/pricing). If you use OpenRouter, start with [Poolside Laguna S 2.1](https://openrouter.ai/poolside/laguna-s-2.1:free), a coding-agent model with 262K context, or [Cohere North Mini Code](https://openrouter.ai/cohere/north-mini-code:free) for quicker iterations. When a Gemini or Groq key is saved, AIFLUX queries that provider's model catalog; xKiro and OpenRouter catalogs are already discovered live. In **Settings**, you can leave **Auto-select a recommended model on connect** enabled or switch it off to keep your current/manual choice. Automatic recommendations only select known free-tier picks; additional Gemini/Groq models discovered with a personal key are marked **CHECK PRICING** and require a manual choice. Review each provider's pricing and account limits before using them. If discovery is unavailable, curated picks remain visible, but provider availability must be checked at request time. Groq publishes [model IDs](https://console.groq.com/docs/models) and [plan rate limits](https://console.groq.com/docs/rate-limits).
 
 **Free is not unlimited.** Availability, daily limits, regional eligibility, and free-tier terms can change. xKiro free models use a daily token allowance; check its [pricing guide](https://docs.xkiro.com/guides/pricing/) and account usage. On Google's free tier, prompts may be used to improve its products; some OpenRouter free variants may also use inputs and outputs for training. Review each provider's terms before sending sensitive code. [Google pricing](https://ai.google.dev/gemini-api/docs/pricing) · [Poolside free-model details](https://openrouter.ai/poolside/laguna-s-2.1:free)
 
@@ -47,6 +47,22 @@ In the chat composer, click **Web** to cycle **Off → Auto → Always**. Off (t
 Search uses [Tavily](https://docs.tavily.com/documentation/keyless). Rate-limited **keyless** search works without signup or a Tavily key; for your own allowance, add a [free Tavily key](https://app.tavily.com/) in **Settings → Live web search**, or set `TAVILY_API_KEY` on the server. User keys override the server key. Tavily's free-account credits and keyless quotas can change; [check its current pricing/credits](https://docs.tavily.com/documentation/api-credits). Each Auto/Always message may add one non-streaming AI planning call; if a search runs, it also uses a Tavily search and the normal AI answer call, consuming their respective allowances.
 
 **Privacy:** The AI planner sees the latest question (appended code-file attachments are stripped for planning), and only a bounded query—not the whole conversation—is sent to Tavily. The selected AI receives the search snippets and your original chat context to write the answer. We reject common secret patterns in search queries, but cannot guarantee that arbitrary private information in your question will be caught. **Don't enable search for sensitive prompts.** Tavily results are treated as untrusted data, not instructions. Search mode is remembered locally; the optional Tavily key follows the same session-storage / “Remember on this device” setting as AI keys.
+
+## GitHub repository context (read-only)
+
+Click the GitHub icon in the chat composer, authorize the AIFLUX GitHub App, and install it on the repositories you want to use. The browser can browse installed private/public repositories, a bounded list of source files, open issues, and open pull requests. Selecting a file, issue, or pull request previews it; only **Add to next message** attaches that bounded text to your next AI request. AIFLUX provides no repository-write, issue-write, or pull-request-write endpoint. Never paste a GitHub token into chat.
+
+The workspace operator must create a **GitHub App** (not a classic OAuth App) so access can be limited to fine-grained, read-only permissions. Configure **Contents: Read-only**, **Issues: Read-only**, and **Pull requests: Read-only**; Metadata is read-only by default. Set the GitHub App's **User authorization callback URL** to `https://YOUR_DOMAIN/api/github` (AIFLUX uses the web application OAuth flow and requests `offline_access` only to refresh expiring user tokens; repository access comes from the app's read-only permissions and installation). Leave expiring user tokens enabled, then install the app only on the repositories that should be available. Add these server-side environment variables:
+
+```dotenv
+GITHUB_APP_CLIENT_ID=
+GITHUB_APP_CLIENT_SECRET=
+GITHUB_OAUTH_CALLBACK_URL=https://YOUR_DOMAIN/api/github
+GITHUB_APP_INSTALL_URL=https://github.com/apps/YOUR_APP_SLUG/installations/new # optional
+GITHUB_SESSION_SECRET= # at least 32 random characters; e.g. openssl rand -hex 32
+```
+
+Set the same callback URL in the GitHub App settings and in the server environment. `GITHUB_APP_INSTALL_URL` is optional; when set to the app's `https://github.com/apps/<slug>/installations/new` URL, the repository browser can link directly to installation. For Vercel, add these values under the project's Environment Variables and redeploy. The OAuth access/refresh tokens never enter browser storage or the AI request: AIFLUX keeps them in an encrypted, HttpOnly, SameSite=Lax cookie and refreshes expiring GitHub App user tokens server-side. Only HTTPS deployments set the Secure cookie flag. If the session secret changes, connected users need to reconnect.
 
 ## AIFLUX assistant identity
 
@@ -59,7 +75,7 @@ Every chat request sends a **server-owned system instruction** to the selected m
 - **Chat and code** with streamed answers, Markdown, optional live web search with source links, code blocks, model switching, copy actions, and a persistent local conversation history.
 - **Build in Canvas** using an editable syntax-highlighted CodeMirror editor. Named fenced code blocks (for example, one marked `html filename="index.html"`) from an AI answer become files automatically. Edited files are versioned rather than silently overwritten by a later answer.
 - **Preview safely**: HTML or SVG projects can be previewed in a sandboxed iframe. Separate `.css` and `.js` files are included in the preview; external network requests are blocked. This is a web preview, **not** an unrestricted code execution environment or a React/TypeScript compiler.
-- **Bring context** by attaching up to three text/code files (30 KB each) or adding a Canvas file to your next message. Export the current file, download the whole Canvas as a ZIP, or export a conversation as Markdown.
+- **Bring context** by attaching up to three text/code files (30 KB each), adding a Canvas file, or selecting an installed GitHub repository file/issue/pull request for your next message. Export the current file, download the whole Canvas as a ZIP, or export a conversation as Markdown.
 - **Keep control**: chats and code live in your browser's local storage; API keys aren't included in chat exports. Delete a conversation to remove its files from this browser.
 
 ## Configuration and deployment
@@ -74,10 +90,15 @@ GROQ_API_KEY=
 TAVILY_API_KEY=
 OLLAMA_BASE_URL=
 AIFLUX_ACCESS_CODE=
+GITHUB_APP_CLIENT_ID=
+GITHUB_APP_CLIENT_SECRET=
+GITHUB_OAUTH_CALLBACK_URL=https://YOUR_DOMAIN/api/github
+GITHUB_APP_INSTALL_URL=https://github.com/apps/YOUR_APP_SLUG/installations/new
+GITHUB_SESSION_SECRET=
 PORT=3000
 ```
 
-- User-provided keys take precedence over server keys for that request. The browser sends the selected AI key (and, if search is enabled, an optional Tavily key) to the AIFLUX server; the server forwards each only to its respective provider over HTTPS. Keys are not written to server storage or logs by AIFLUX.
+- User-provided keys take precedence over server keys for that request. The browser sends the selected AI key (and, if search is enabled, an optional Tavily key) to the AIFLUX server; the server forwards each only to its respective provider over HTTPS. Gemini/Groq keys are also used to discover models for that provider. Keys are not written to server storage or logs by AIFLUX. Additional key-discovered models may have different prices or limits; verify before use.
 - If deploying with **shared server-side keys**, including `TAVILY_API_KEY`, set `AIFLUX_ACCESS_CODE` at a minimum. Visitors must enter it in Settings before sending requests. This is a **shared gate**, not user accounts or a replacement for a proper auth gateway. Protect public instances with authentication and usage controls.
 - The server only calls fixed AI provider/Tavily URLs or the operator-configured Ollama URL. OpenRouter requests must target a specific `:free` chat model; the random router, known safety/utility model IDs, and paid variants are rejected even when requested directly via the API. xKiro requests must match a freshly verified live catalog entry marked free with zero input/output prices; the server fails closed if it cannot verify the current tier. The server applies basic per-IP limits (60 chat requests and 12 search-enabled requests per 10 minutes per running instance) and a two-minute request timeout. Serverless instances may each have their own counters, and host-level timeouts can be shorter; these controls are not a substitute for authentication.
 - Run behind HTTPS in production. Browser storage is not an encrypted vault; avoid “Remember on this device” on shared computers. Review your provider's data-handling policy before sending private code.
@@ -85,7 +106,7 @@ PORT=3000
 
 ### Deploy on Vercel
 
-This repository includes `vercel.json` for the Vite frontend and `api/*.js` Vercel Functions for the chat, config, and model-catalog endpoints. When the repository is linked to Vercel, pushing a branch creates a **preview deployment**; production deploys from the Vercel project's production branch (usually `main`). No API key is required to build or view the UI, but live cloud chat needs a user key or a server key configured under **Vercel → Project Settings → Environment Variables**. Never commit a `.env` file.
+This repository includes `vercel.json` for the Vite frontend and `api/*.js` Vercel Functions for chat, config, model catalogs/discovery, and read-only GitHub OAuth/context endpoints. When the repository is linked to Vercel, pushing a branch creates a **preview deployment**; production deploys from the Vercel project's production branch (usually `main`). No API key is required to build or view the UI, but live cloud chat needs a user key or a server key configured under **Vercel → Project Settings → Environment Variables**. GitHub OAuth requires the client ID, client secret, callback URL, and session secret described above; the app-install URL is optional. The GitHub App callback must match the deployed domain. Never commit a `.env` file.
 
 If you use a shared `OPENROUTER_API_KEY`, `XKIRO_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`, **or `TAVILY_API_KEY`** on Vercel, also set `AIFLUX_ACCESS_CODE` and put the app behind appropriate authentication before inviting public traffic. Without `TAVILY_API_KEY`, the chat function tries Tavily's rate-limited keyless API; visitors can supply their own key in Settings. `OLLAMA_BASE_URL=http://127.0.0.1:11434` works only when AIFLUX and Ollama run on the **same machine**; it will not reach your laptop from Vercel's cloud.
 
@@ -96,8 +117,9 @@ src/                 React UI, Canvas, model library, local workspace state
 src/lib/             file parsing, preview builder, streaming client, storage
 api/*.js             Vercel serverless entrypoints for the same API
 server/api-app.mjs   Shared Express API routes
+server/github.mjs    GitHub App OAuth, encrypted sessions, and read-only context endpoints
 server/index.mjs     Local Node server + Vite dev middleware / production assets
-server/providers.mjs provider adapters, validation, free-model discovery, SSE parsing
+server/providers.mjs provider adapters, validation, model discovery, SSE parsing
 server/assistant-profile.mjs  AIFLUX identity, shipped capability list, per-request search guidance
 server/search.mjs    AI search planning, Tavily requests, source normalization
 vercel.json          Vite build and SPA routing configuration
@@ -105,7 +127,7 @@ vercel.json          Vite build and SPA routing configuration
 
 ## Verified locally
 
-`npm test` covers the Vercel function entrypoints, provider request validation, free-only OpenRouter routing, live xKiro free-tier/zero-price discovery and paid-model rejection, Gemini/Groq/Ollama request formats, the AIFLUX identity/capability profile on every provider and search path, AI tool planning, Tavily keyless/keyed calls and source sanitization, search/answer streaming, SSE parsing, error redaction, code-file extraction, and preview sandbox generation. External AI and Tavily requests are **mocked** in these tests; a real end-to-end search requires a working AI connection and Tavily availability. `npm run build` checks the TypeScript app and builds the production bundle.
+`npm test` covers the Vercel function entrypoints, provider request validation, free-only OpenRouter routing, live xKiro free-tier/zero-price discovery and paid-model rejection, Gemini/Groq key-scoped model discovery, read-only GitHub App OAuth/session/repository/file/issue/PR flows, the AIFLUX identity/capability profile on every provider and search path, AI tool planning, Tavily keyless/keyed calls and source sanitization, search/answer streaming, SSE parsing, error redaction, code-file extraction, and preview sandbox generation. External GitHub, AI, model-catalog, and Tavily requests are **mocked** in these tests; real integrations require valid keys and provider access. `npm run build` checks the TypeScript app and builds the production bundle.
 
 ---
 

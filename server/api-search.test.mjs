@@ -245,7 +245,7 @@ test('best-effort per-IP limit caps attempts to use web search', async () => {
   await withServer(() => { throw new Error('Invalid requests should not call upstreams'); }, async (post) => {
     let limited = false;
     for (let i = 0; i < 13; i++) {
-      const result = await post({ ...body('auto'), model: 'not-in-catalog' });
+      const result = await post({ ...body('auto'), model: 'not-in-catalog!' });
       if (result.status === 429) {
         assert.match((await result.json()).error, /Too many web searches/);
         limited = true;

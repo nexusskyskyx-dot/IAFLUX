@@ -35,7 +35,7 @@ export default function ModelLibrary({ models, selected, catalogAvailable, isCon
         <div className="library-hero-decoration"><span className="library-orbit one" /><span className="library-orbit two" /><span className="library-orbit-star">✳</span></div>
         <div className="eyebrow"><span className="eyebrow-line" /> THE MODEL LIBRARY</div>
         <h1>Find your <em>flow.</em></h1>
-        <p>Different minds for different moments. Explore free models and free-tier APIs, then pick the right one for what you're building.</p>
+        <p>Different minds for different moments. Explore free picks and models discovered for your connected provider keys; check pricing labels before choosing.</p>
         <div className="library-hero-stat"><span className="library-stat-dot" /><strong>{models.length}</strong> models to explore <span className="library-stat-divider" /> <span>One creative workspace</span></div>
       </div>
       <div className="library-controls"><div className="library-control-heading"><div><span className="section-eyebrow">THE COLLECTION</span><h2>Explore models <span>({models.length})</span></h2></div><div className="library-live"><span className={`status-dot ${catalogAvailable === false ? 'status-amber' : ''}`} />{catalogAvailable === false ? 'Live catalog unavailable' : catalogAvailable === null ? 'Checking live catalog' : 'Live free catalog'}<button onClick={onRefresh} title="Refresh free-model catalog" aria-label="Refresh free-model catalog"><RefreshCw size={14} /></button></div></div>

@@ -74,17 +74,19 @@ test('web search preference and Tavily key persist with existing session/remembe
     assert.equal(loadSearchMode(), 'always');
     local.set('aiflux.search-mode.v1', 'invalid');
     assert.equal(loadSearchMode(), 'off');
-    const credentials = { keys: { openrouter: '', xkiro: 'xkiro-key', gemini: 'ai-key', groq: '' }, searchKey: 'tavily-key', accessCode: '', remember: false };
+    const credentials = { keys: { openrouter: '', xkiro: 'xkiro-key', gemini: 'ai-key', groq: '' }, searchKey: 'tavily-key', accessCode: '', remember: false, autoSelectOnConnect: false };
     saveCredentials(credentials);
     assert.equal(local.has('aiflux.credentials.v1'), false);
     assert.equal(loadCredentials().searchKey, 'tavily-key');
     assert.equal(loadCredentials().keys.xkiro, 'xkiro-key');
+    assert.equal(loadCredentials().autoSelectOnConnect, false);
     saveCredentials({ ...credentials, remember: true });
     assert.equal(session.has('aiflux.credentials.v1'), false);
     assert.equal(local.has('aiflux.credentials.v1'), true);
     assert.equal(loadCredentials().searchKey, 'tavily-key');
     local.set('aiflux.credentials.v1', JSON.stringify({ keys: credentials.keys, remember: true }));
     assert.equal(loadCredentials().searchKey, ''); // Legacy saved settings still work.
+    assert.equal(loadCredentials().autoSelectOnConnect, true); // Auto-select is enabled for older saved settings.
   } finally {
     if (originalLocal === undefined) delete globalThis.localStorage;
     else globalThis.localStorage = originalLocal;

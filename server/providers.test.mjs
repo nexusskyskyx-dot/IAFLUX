@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   validateChat, buildRequest, readSSE, readLines, extractChunk,
-  friendlyUpstreamError, getFreeOpenRouterModels, getFreeXkiroModels, isUsableFreeXkiroModel,
+  friendlyUpstreamError, getFreeOpenRouterModels, getFreeXkiroModels, getGeminiModels, getGroqModels, isUsableFreeXkiroModel,
 } from './providers.mjs';
 
 const messages = [{ role: 'user', content: 'Build a button' }];
@@ -29,7 +29,10 @@ test('allows named free chat models, rejects random routing, paid and non-chat m
     'org/moderation-v1:free', 'org/embedding-v1:free', 'org/reranker-v1:free',
     'org/text-to-speech-v1:free',
   ]) assert.throws(() => request('openrouter', id), /safety or utility model/, id);
-  assert.throws(() => request('groq', 'unknown'), /not in the supported/);
+  assert.throws(() => request('groq', 'unknown'), /provider catalog/);
+  assert.throws(() => validateChat({ provider: 'groq', model: 'groq-new-model', messages }), /provider catalog/);
+  assert.equal(validateChat({ provider: 'groq', model: 'groq-new-model', messages }, false, new Set(), true).model, 'groq-new-model');
+  assert.throws(() => validateChat({ provider: 'gemini', model: 'embedding-model', messages }, false, new Set(), true), /safety or utility model/);
   assert.throws(() => request('ollama', 'llama3:latest'), /Connect Ollama/);
   assert.throws(() => validateChat({ provider: 'ollama', model: 'llama-guard3:latest', messages }, true), /safety or utility model/);
   assert.equal(validateChat({ provider: 'ollama', model: 'llama3:latest', messages }, true).model, 'llama3:latest');
@@ -118,4 +121,54 @@ test('xKiro discovery includes every zero-priced free chat model, not only IDs w
   assert.equal(isUsableFreeXkiroModel(data[3]), false);
   assert.equal(isUsableFreeXkiroModel(data[4]), false);
   await assert.rejects(() => getFreeXkiroModels(async () => ({ ok: false })), /catalog unavailable/);
+});
+
+test('Gemini and Groq model discovery is key-scoped, chat-only, and identifies uncurated billing choices', async () => {
+  const geminiRequests = [];
+  const geminiModels = await getGeminiModels('gemini-secret', async (url, options) => {
+    geminiRequests.push({ url: new URL(url), options });
+    const page = new URL(url).searchParams.get('pageToken');
+    return { ok: true, json: async () => page ? ({ models: [
+      { name: 'models/gemini-2.5-flash', displayName: 'Gemini 2.5 Flash', supportedGenerationMethods: ['streamGenerateContent'] },
+      { name: 'models/gemini-embedding-001', displayName: 'Embedding', supportedGenerationMethods: ['embedContent'] },
+    ] }) : ({ models: [
+      { name: 'models/gemini-3.8-flash', displayName: 'Gemini 3.8 Flash', description: 'Fast code model', inputTokenLimit: 1_000_000, supportedGenerationMethods: ['generateContent'] },
+      { name: 'models/gemini-3.9-pro-experimental', displayName: 'Gemini Pro Experimental', supportedGenerationMethods: ['generateContent'] },
+      { name: 'models/gemini-image-generation', displayName: 'Image generation', supportedGenerationMethods: ['generateContent'] },
+    ], nextPageToken: 'second' }) };
+  });
+  assert.equal(geminiRequests.length, 2);
+  assert.equal(geminiRequests[0].options.headers['x-goog-api-key'], 'gemini-secret');
+  assert.ok(geminiRequests[0].options.signal);
+  assert.deepEqual(geminiModels.map((model) => model.id), ['gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-3.9-pro-experimental']);
+  assert.equal(geminiModels[0].badge, 'BEST OVERALL');
+  assert.equal(geminiModels[2].badge, 'CHECK PRICING');
+  assert.equal(geminiModels[0].contextLength, 1_000_000);
+
+  const freeGemini = await getGeminiModels('gemini-secret', async () => ({ ok: true, json: async () => ({ models: [
+    { name: 'models/gemini-3.8-flash', displayName: 'Gemini 3.8 Flash', supportedGenerationMethods: ['generateContent'] },
+    { name: 'models/gemini-3.9-pro-experimental', displayName: 'Gemini Pro', supportedGenerationMethods: ['generateContent'] },
+  ] }) }), { includeUncurated: false });
+  assert.deepEqual(freeGemini.map((model) => model.id), ['gemini-3.8-flash']);
+
+  const groq = await getGroqModels('groq-secret', async (url, options) => {
+    assert.equal(url, 'https://api.groq.com/openai/v1/models');
+    assert.equal(options.headers.Authorization, 'Bearer groq-secret');
+    assert.ok(options.signal);
+    return { ok: true, json: async () => ({ data: [
+      { id: 'openai/gpt-oss-120b', active: true, context_window: 131_000 },
+      { id: 'openai/gpt-oss-20b', active: false },
+      { id: 'org/embedding-model', active: true },
+      { id: 'org/my-coding-model', active: true },
+    ] }) };
+  });
+  assert.deepEqual(groq.map((model) => model.id), ['openai/gpt-oss-120b', 'org/my-coding-model']);
+  assert.equal(groq[0].badge, 'GROQ FREE PLAN');
+  assert.equal(groq[1].badge, 'CHECK PRICING');
+  const freeGroq = await getGroqModels('groq-secret', async () => ({ ok: true, json: async () => ({ data: [
+    { id: 'openai/gpt-oss-120b', active: true }, { id: 'org/other-model', active: true },
+  ] }) }), { includeUncurated: false });
+  assert.deepEqual(freeGroq.map((model) => model.id), ['openai/gpt-oss-120b']);
+  await assert.rejects(() => getGeminiModels('', async () => { throw new Error('must not be called'); }), /valid Gemini API key/);
+  await assert.rejects(() => getGroqModels('groq-secret', async () => ({ ok: false, status: 403 })), /Check the API key/);
 });
