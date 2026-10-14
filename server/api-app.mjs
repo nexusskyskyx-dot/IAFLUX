@@ -8,7 +8,7 @@ import {
   readSSE, readLines, extractChunk, getFreeOpenRouterModels,
 } from './providers.mjs';
 import { planWebSearch, searchWeb, shouldBypassSearch, withSearchContext } from './search.mjs';
-import { listAIFluxModels, memberInfo, resolveAIFluxRoute } from './aiflux-family.mjs';
+import { listAIFluxModels, memberInfo, resolveAIFluxRoute, resolveAIFluxRoutes } from './aiflux-family.mjs';
 import { buildAssistantPrompt } from './assistant-profile.mjs';
 
 const app = express();
@@ -149,81 +149,184 @@ app.post('/api/chat', rateLimit, async (req, res) => {
       throw new RequestError(400, 'Invalid API key header.');
     }
     if (searchHeader.length > 512) throw new RequestError(400, 'Invalid API key.');
-    const input = validateChat(req.body, Boolean(ollamaBaseUrl), (memberId) => {
-      return resolveAIFluxRoute(memberId, userKeys, envKeys, Boolean(ollamaBaseUrl));
-    });
     const suppliedSearchKey = searchHeader;
-    const selectedProvider = input.provider;
-    const key = (userKeys[selectedProvider] || envKeys[selectedProvider] || '');
-    // AIFLUX persona system prompt: append the member addendum onto the base
-    // AIFLUX identity prompt, and force searchMode=auto for Toki.
-    const personaSystemPrompt = input.aifluxRoute
-      ? buildAssistantPrompt({ provider: input.provider, model: input.model, searchMode: input.searchMode }) + `\n\n${input.aifluxRoute.memberAddendum}`
-      : undefined;
-    // Check the model connection before making any search calls.
-    let { url, options, format } = buildRequest({ ...input, systemPrompt: personaSystemPrompt }, key, ollamaBaseUrl);
+
+    // Build the full failover route list for AIFLUX family requests so we can
+    // transparently try the next free provider when one misbehaves (empty
+    // stream, 5xx, rate limit, SSE protocol errors like "invalid or omitted
+    // terminal usage"). Non-AIFLUX requests get a single-element list.
+    let aifluxRoutes = null;
+    let memberAddendum = '';
+    const bodyProvider = req.body?.provider;
+    const bodyModel = req.body?.model;
+    if (bodyProvider === 'aiflux') {
+      aifluxRoutes = resolveAIFluxRoutes(bodyModel, userKeys, envKeys, Boolean(ollamaBaseUrl));
+      memberAddendum = aifluxRoutes[0].memberAddendum;
+    }
+
+    // Validate using the first route, then swap routes in on retry.
+    const input = validateChat(req.body, Boolean(ollamaBaseUrl), (memberId) => {
+      const routes = aifluxRoutes || resolveAIFluxRoutes(memberId, userKeys, envKeys, Boolean(ollamaBaseUrl));
+      return routes[0];
+    });
+
     timeout = setTimeout(() => controller.abort(new Error('timeout')), 120_000);
+
+    // Run web search once (uses whichever primary route key we start with).
+    // Search results are reused across failover retries since sources are not
+    // model-specific.
+    let searchResult = null;
     if (input.searchMode !== 'off' && !shouldBypassSearch(input)) {
+      const searchKey = aifluxRoutes ? aifluxRoutes[0].key : (userKeys[input.provider] || envKeys[input.provider] || '');
       startStream(res, input.model);
       sendEvent(res, { type: 'search', phase: 'planning' });
-      const query = await planWebSearch(input, key, ollamaBaseUrl, { signal: controller.signal });
+      const query = await planWebSearch(input, searchKey, ollamaBaseUrl, { signal: controller.signal });
       if (query) {
         sendEvent(res, { type: 'search', phase: 'searching', query });
         const sources = await searchWeb(query, suppliedSearchKey || envSearchKey, { signal: controller.signal });
         sendEvent(res, { type: 'sources', query, sources });
-        ({ url, options, format } = buildRequest(withSearchContext(input, query, sources), key, ollamaBaseUrl));
+        searchResult = { query, sources };
       } else {
-        // The already-built answer request has the full AIFLUX profile plus
-        // a mode-specific warning that no live search was performed.
         sendEvent(res, { type: 'search', phase: 'skipped' });
       }
     }
-    const upstream = await fetch(url, { ...options, signal: controller.signal });
-    if (!upstream.ok) {
-      const raw = await upstream.text();
-      throw new RequestError(upstream.status >= 500 ? 502 : upstream.status, friendlyUpstreamError(upstream.status, raw, key));
-    }
-    if (!upstream.body) throw new RequestError(502, 'The provider returned an empty response.');
-    startStream(res, input.model);
-    let usedModel = input.model;
-    let hasText = false;
-    let rawText = '';
-    const chunks = format === 'ollama' ? readLines(upstream.body) : readSSE(upstream.body);
-    for await (const data of chunks) {
+
+    // Errors that justify failing over to the next route: network/5xx/429,
+    // provider-side "invalid or omitted terminal usage" style SSE failures,
+    // empty streams, and any non-user-auth error from keyless endpoints.
+    const isFailoverError = (err, route) => {
+      if (!(err instanceof RequestError)) return true; // network/abort/parse
+      if (err.status === 401 || err.status === 403) {
+        // Auth errors on user-keyed providers are real — don't retry them.
+        // On keyless providers (which shouldn't need auth) treat 401/403 as
+        // transient infra failures.
+        return route?.keyless === true;
+      }
+      if (err.status === 400) {
+        const msg = String(err.message || '').toLowerCase();
+        // Retry malformed-stream / model-not-available / usage errors, but
+        // never retry validation errors about the user's own request.
+        return /terminal usage|invalid.*usage|no text|empty response|did not complete|non.?chat|returned no/.test(msg);
+      }
+      return err.status === 429 || err.status >= 500;
+    };
+
+    const buildAnswerRequest = (route) => {
+      const effectiveInput = {
+        ...input,
+        provider: route.provider,
+        model: route.model,
+        aifluxRoute: input.aifluxRoute ? { ...input.aifluxRoute, provider: route.provider, model: route.model } : null,
+      };
+      if (searchResult) {
+        // withSearchContext builds its own systemPrompt via buildAssistantPrompt
+        // with searchPerformed=true; prepend the AIFLUX member addendum on top.
+        const withCtx = withSearchContext(effectiveInput, searchResult.query, searchResult.sources);
+        if (input.aifluxRoute) {
+          withCtx.systemPrompt = `${withCtx.systemPrompt}\n\n${route.memberAddendum}`;
+        }
+        return buildRequest(withCtx, route.key, ollamaBaseUrl);
+      }
+      const systemPrompt = input.aifluxRoute
+        ? buildAssistantPrompt({ provider: route.provider, model: route.model, searchMode: input.searchMode, searchPerformed: false }) + `\n\n${route.memberAddendum}`
+        : undefined;
+      return buildRequest({ ...effectiveInput, systemPrompt }, route.key, ollamaBaseUrl);
+    };
+
+    const routes = aifluxRoutes || [{
+      provider: input.provider, model: input.model, key: (userKeys[input.provider] || envKeys[input.provider] || ''), keyless: false,
+    }];
+
+    let lastError = null;
+    let emittedAnyDeltas = false;
+    for (let i = 0; i < routes.length; i++) {
       if (controller.signal.aborted) break;
-      const part = extractChunk(format, data);
-      if (part.error) {
-        const safeMessage = key ? String(part.error).replaceAll(key, '[redacted]') : String(part.error);
-        throw new RequestError(502, safeMessage.slice(0, 320));
+      const route = routes[i];
+      let request;
+      try {
+        request = buildAnswerRequest(route);
+      } catch (err) {
+        lastError = err;
+        continue;
       }
-      if (input.provider === 'openrouter' && part.model &&
-          (part.model === 'openrouter/free' || isNonChatModelId(part.model))) {
-        throw new RequestError(502, 'OpenRouter returned a safety or utility model instead of a coding assistant. Choose another free model.');
-      }
-      if (part.model && part.model !== usedModel) {
-        usedModel = part.model;
-        sendEvent(res, { type: 'model', model: usedModel });
-      }
-      if (part.text) {
-        rawText += part.text;
-        hasText = true;
-        sendEvent(res, { type: 'delta', text: part.text });
-      }
-      if (part.done) break;
-    }
-    if (!controller.signal.aborted) {
-      // Some providers stream whitespace-only chunks or emit only tool-call XML
-      // from the client-side tool system. Treat non-empty raw text that strips
-      // to nothing after whitespace/tool removal as a valid (empty-prose) turn
-      // rather than a hard error — the client will surface tool activity.
-      const stripped = rawText.replace(/<af-tool\b[^>]*>[\s\S]*?<\/af-tool>/g, '').trim();
-      if (!hasText || (!stripped && rawText.trim().length === 0)) {
-        sendEvent(res, { type: 'error', message: 'The model returned no text. Try another model or rephrase your request.' });
-      } else {
+      // Use a shorter timeout for keyless public endpoints so failover is
+      // fast when one is down or stalling.
+      const routeTimeoutMs = route.keyless ? 20_000 : 120_000;
+      const routeController = new AbortController();
+      const onAbort = () => routeController.abort();
+      controller.signal.addEventListener('abort', onAbort);
+      const routeTimer = setTimeout(() => routeController.abort(new Error('route-timeout')), routeTimeoutMs);
+      try {
+        const upstream = await fetch(request.url, { ...request.options, signal: routeController.signal });
+        if (!upstream.ok) {
+          const raw = await upstream.text().catch(() => '');
+          throw new RequestError(upstream.status >= 500 ? 502 : upstream.status, friendlyUpstreamError(upstream.status, raw, route.key));
+        }
+        if (!upstream.body) throw new RequestError(502, 'The provider returned an empty response.');
+        if (!emittedAnyDeltas) startStream(res, route.model);
+        let usedModel = route.model;
+        let hasText = false;
+        let rawText = '';
+        let streamError = null;
+        const chunks = request.format === 'ollama' ? readLines(upstream.body) : readSSE(upstream.body);
+        for await (const data of chunks) {
+          if (routeController.signal.aborted || controller.signal.aborted) break;
+          const part = extractChunk(request.format, data);
+          if (part.error) {
+            const safeMessage = route.key ? String(part.error).replaceAll(route.key, '[redacted]') : String(part.error);
+            streamError = new RequestError(502, safeMessage.slice(0, 320));
+            break;
+          }
+          if (route.provider === 'openrouter' && part.model &&
+              (part.model === 'openrouter/free' || isNonChatModelId(part.model))) {
+            streamError = new RequestError(502, 'OpenRouter returned a safety or utility model instead of a coding assistant. Choose another free model.');
+            break;
+          }
+          if (part.model && part.model !== usedModel) {
+            usedModel = part.model;
+            // Only announce model swaps for the first route that actually
+            // produces tokens, not silent failovers.
+            if (emittedAnyDeltas || i === 0) sendEvent(res, { type: 'model', model: usedModel });
+          }
+          if (part.text) {
+            rawText += part.text;
+            hasText = true;
+            emittedAnyDeltas = true;
+            sendEvent(res, { type: 'delta', text: part.text });
+          }
+          if (part.done) break;
+        }
+        if (streamError) throw streamError;
+        if (routeController.signal.aborted && !controller.signal.aborted) {
+          throw new RequestError(504, 'The provider took too long to respond.');
+        }
+        // Validate the stream actually produced readable text.
+        const stripped = rawText.replace(/<af-tool\b[^>]*>[\s\S]*?<\/af-tool>/g, '').trim();
+        if (!hasText || (!stripped && rawText.trim().length === 0)) {
+          throw new RequestError(502, 'The model returned no text.');
+        }
+        // Success — close out.
         sendEvent(res, { type: 'done', model: usedModel });
+        res.end();
+        lastError = null;
+        break;
+      } catch (err) {
+        lastError = err;
+        if (!isFailoverError(err, route) || i === routes.length - 1 || emittedAnyDeltas) break;
+        // Silently try the next route (we haven't streamed any answer text
+        // yet, so the user won't see a glitch).
+        continue;
+      } finally {
+        clearTimeout(routeTimer);
+        controller.signal.removeEventListener('abort', onAbort);
+        try { routeController.abort(); } catch { /* already ended */ }
       }
     }
-    res.end();
+
+    if (lastError && !res.writableEnded) {
+      throw lastError;
+    }
+    if (!res.writableEnded) res.end();
   } catch (error) {
     const message = controller.signal.aborted
       ? 'The provider took too long to respond. Please try again.'

@@ -96,15 +96,12 @@ export const AIFLUX_MEMBERS = Object.freeze({
 // endpoints are always available (no key needed) and are tried first for Flux.
 const CANDIDATES = Object.freeze({
   flux: [
-    // Built-in keyless public free endpoints — no API key needed from user.
-    // Pollinations anonymous tier (text.pollinations.ai/openai) — OpenAI-compatible,
-    // no key, rate-limited per IP. Routes to their current anonymous model (GPT-OSS 20B).
-    { provider: 'pollinations', model: 'openai' },
-    // OVHcloud AI Endpoints anonymous tier — OpenAI-compatible, no key, 2 RPM/IP.
-    // Mistral Small and Llama variants are available keyless.
-    { provider: 'ovh', model: 'mistralai/Mistral-Nemo-Instruct-2407' },
-    { provider: 'ovh', model: 'meta-llama/Llama-3.3-70B-Instruct' },
-    // User-connected keys (strongest free models, preferred after keyless).
+    // User-connected keys are tried FIRST when available — these are reliable,
+    // high-quality free models the user explicitly configured. The keyless
+    // public endpoints act as the built-in zero-config fallback so Flux works
+    // for visitors without any keys, but they sit behind user keys because
+    // anonymous public tiers are less reliable (rate limits, SSE quirks,
+    // occasional "invalid or omitted terminal usage" style errors).
     { provider: 'gemini', model: 'gemini-3.8-flash' },
     { provider: 'groq', model: 'openai/gpt-oss-120b' },
     { provider: 'openrouter', model: 'openai/gpt-oss-120b:free' },
@@ -115,6 +112,14 @@ const CANDIDATES = Object.freeze({
     { provider: 'gemini', model: 'gemini-2.5-flash' },
     { provider: 'groq', model: 'openai/gpt-oss-20b' },
     { provider: 'gemini', model: 'gemini-2.5-flash-lite' },
+    // Built-in keyless public free endpoints — no API key needed from user.
+    // These always work as a last resort, even for first-time visitors who
+    // never opened Settings. They're less reliable than keyed tiers, so the
+    // chat handler transparently fails over between them on errors/empty
+    // streams.
+    { provider: 'pollinations', model: 'openai' },
+    { provider: 'ovh', model: 'mistralai/Mistral-Nemo-Instruct-2407' },
+    { provider: 'ovh', model: 'meta-llama/Llama-3.3-70B-Instruct' },
   ],
   hiku: [
     { provider: 'gemini', model: 'gemini-3.8-flash' },
@@ -191,27 +196,44 @@ export function memberInfo(memberId) {
  * @param {boolean} ollamaConfigured
  */
 export function resolveAIFluxRoute(memberId, userKeys, envKeys, ollamaConfigured) {
+  const routes = resolveAIFluxRoutes(memberId, userKeys, envKeys, ollamaConfigured);
+  return routes[0];
+}
+
+/**
+ * Return an ordered list of all viable (provider, model, key) routes for a
+ * member. The chat handler walks these and transparently fails over to the
+ * next when an upstream returns a 5xx / 429 / empty / malformed response —
+ * so a keyless endpoint that misbehaves (e.g. returns an SSE stream with no
+ * content, or "invalid or omitted terminal usage") immediately falls through
+ * to the next working provider without the user seeing an error.
+ */
+export function resolveAIFluxRoutes(memberId, userKeys, envKeys, ollamaConfigured) {
   const info = memberInfo(memberId);
-  const hasKey = (provider) => Boolean((userKeys[provider] || '').trim() || (envKeys[provider] || '').trim());
+  const keyFor = (provider) => {
+    if (KEYLESS_PROVIDERS.has(provider) || provider === 'ollama') return '';
+    return (userKeys[provider] || '').trim() || (envKeys[provider] || '').trim();
+  };
   const connected = (provider) => {
-    if (KEYLESS_PROVIDERS.has(provider)) return true; // built-in, always available
+    if (KEYLESS_PROVIDERS.has(provider)) return true;
     if (provider === 'ollama') return ollamaConfigured;
-    return hasKey(provider);
+    return Boolean(keyFor(provider));
   };
   const candidates = CANDIDATES[memberId] || [];
+  const routes = [];
   for (const candidate of candidates) {
-    if (connected(candidate.provider)) {
-      return {
-        ...candidate,
-        memberAddendum: info.systemAddendum,
-        forceSearch: Boolean(info.forceSearch),
-        keyless: KEYLESS_PROVIDERS.has(candidate.provider),
-      };
-    }
+    if (!connected(candidate.provider)) continue;
+    routes.push({
+      ...candidate,
+      key: keyFor(candidate.provider),
+      memberAddendum: info.systemAddendum,
+      forceSearch: Boolean(info.forceSearch),
+      keyless: KEYLESS_PROVIDERS.has(candidate.provider),
+    });
   }
-  // Should never happen because keyless providers are always available for
-  // members that list them (i.e. Flux). For members that don't (e.g. Zuki
-  // vision-first), fall through to a helpful error.
-  throw new RequestError(400,
-    `AIFLUX ${info.name} needs at least one connected model provider. Connect a free Gemini, OpenRouter, or Groq key in Settings to use ${info.name}.`);
+  if (routes.length === 0) {
+    throw new RequestError(400,
+      `AIFLUX ${info.name} needs at least one connected model provider. Connect a free Gemini, OpenRouter, or Groq key in Settings to use ${info.name}.`);
+  }
+  return routes;
 }
