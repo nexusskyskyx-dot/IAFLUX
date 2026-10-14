@@ -5,6 +5,7 @@ export type StreamEvent =
   | { type: 'delta'; text: string }
   | { type: 'search'; phase: 'planning' | 'searching' | 'skipped'; query?: string }
   | { type: 'sources'; query: string; sources: WebSource[] }
+  | { type: 'orchestrator'; phase: 'start' | 'planning' | 'research' | 'coding' | 'reviewing'; label: string; description: string }
   | { type: 'error'; message: string };
 
 export async function requestChat(input: {

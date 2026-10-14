@@ -440,3 +440,17 @@ a { color: inherit; }
 .tool-call em { font-style: normal; color: #e9f5d8; font-family: 'JetBrains Mono', monospace; font-size: 10px; opacity: .85; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tool-call-error { border-color: #6a3838; background: #2a1c1c; color: #e9bebe; }
 .tool-call-error svg { color: #f09090; }
+
+/* Flux Orchestrator phase tracker */
+.message-phase-track { margin: 0 0 8px; padding: 10px 12px; border-radius: 10px; background: linear-gradient(180deg, #fff8d012, #ffd66a0a); border: 1px solid #ffd66a33; }
+.message-phase-heading { display: flex; align-items: center; gap: 7px; font-size: 10px; letter-spacing: .12em; color: #ffdf7a; margin-bottom: 8px; }
+.message-phase-heading strong { font-weight: 700; }
+.message-phase-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; }
+.message-phase-list li { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; color: #ffe7a3; }
+.message-phase-list li svg { flex: none; margin-top: 2px; color: #ffd66a; }
+.message-phase-list li strong { display: block; font-weight: 600; color: #fff5d1; }
+.message-phase-list li small { display: block; color: #c5b583; font-size: 10.5px; margin-top: 1px; }
+.phase-done svg { color: #8fe688; }
+.phase-done { opacity: .75; }
+.phase-spin { animation: phaseSpin 1s linear infinite; }
+@keyframes phaseSpin { to { transform: rotate(360deg); } }

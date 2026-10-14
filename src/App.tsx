@@ -228,6 +228,7 @@ export default function App() {
       let actualModel = selectedModel.name;
       let searchDone = false;
       let searchSkipped = false;
+      let phases: ChatMessage['phases'] = [];
       let searchInfo: ChatMessage['search'];
       try {
         await requestChat({
@@ -254,6 +255,12 @@ export default function App() {
             if (event.type === 'sources') {
               searchInfo = { query: event.query, sources: event.sources };
               patchMessage(chatId, assistantId, (message) => ({ ...message, searchStatus: undefined, searchQuery: undefined, search: searchInfo }));
+            }
+            if (event.type === 'orchestrator') {
+              // Mark previous phase done, push new phase as active.
+              const next = [...(phases || []).map((p) => ({ ...p, done: true })), { phase: event.phase, label: event.label, description: event.description, done: false }];
+              phases = next;
+              patchMessage(chatId, assistantId, (message) => ({ ...message, phases: next }));
             }
             if (event.type === 'delta') {
               responseText += event.text;
@@ -352,7 +359,7 @@ export default function App() {
           selectedFileId: generated[0]?.id || params.selectedFileId,
           messages: chat.messages.map((message) => message.id === assistantId
             ? { ...message, content: finalText, status: 'done', model: actualModel,
-                searchStatus: undefined, searchQuery: undefined,
+                searchStatus: undefined, searchQuery: undefined, phases: undefined,
                 ...(searchInfo ? { search: searchInfo } : searchDone ? { searchSkipped } : {}) }
             : message),
         };

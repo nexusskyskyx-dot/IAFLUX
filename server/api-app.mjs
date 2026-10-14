@@ -10,6 +10,7 @@ import {
 import { planWebSearch, searchWeb, shouldBypassSearch, withSearchContext } from './search.mjs';
 import { listAIFluxModels, memberInfo, resolveAIFluxRoute, resolveAIFluxRoutes } from './aiflux-family.mjs';
 import { buildAssistantPrompt } from './assistant-profile.mjs';
+import { runOrchestrator, orchestratorContextBlock } from './aiflux-orchestrator.mjs';
 
 const app = express();
 const ollamaBaseUrl = process.env.OLLAMA_BASE_URL?.trim() || '';
@@ -172,11 +173,35 @@ app.post('/api/chat', rateLimit, async (req, res) => {
 
     timeout = setTimeout(() => controller.abort(new Error('timeout')), 120_000);
 
-    // Run web search once (uses whichever primary route key we start with).
-    // Search results are reused across failover retries since sources are not
-    // model-specific.
+    // Clean user question (strip <canvas-workspace> snapshot and attachments)
+    // so the orchestrator / planner only sees the user's actual words.
+    const rawQuestion = String(input.messages.at(-1)?.content || '');
+    const cleanQuestion = rawQuestion
+      .replace(/\n?<canvas-workspace>[\s\S]*?<\/canvas-workspace>/g, '')
+      .split(/\n\nAttached file:/i)[0].trim();
+
+    // Flux orchestrator: for non-trivial build/research requests, dispatch to
+    // Ziker / Toki / Hiku / Siku internally before drafting the final answer.
+    // The orchestrator handles its own web research (Toki), so we skip the
+    // generic planWebSearch path when orchestration runs.
+    let orchestratorCtx = null;
     let searchResult = null;
-    if (input.searchMode !== 'off' && !shouldBypassSearch(input)) {
+    const isFlux = input.aifluxRoute && bodyModel === 'flux';
+    if (isFlux && !controller.signal.aborted) {
+      startStream(res, input.model);
+      sendEvent(res, { type: 'orchestrator', phase: 'start', label: 'Flux is orchestrating', description: 'Coordinating the AIFLUX team' });
+      orchestratorCtx = await runOrchestrator({
+        question: cleanQuestion,
+        userKeys, envKeys, ollamaConfigured: Boolean(ollamaBaseUrl),
+        sendEvent: (ev) => sendEvent(res, ev),
+        signal: controller.signal,
+        searchCfg: { searchKey: suppliedSearchKey, envSearchKey },
+      });
+      if (orchestratorCtx?.research?.sources?.length) {
+        searchResult = { query: orchestratorCtx.research.query, sources: orchestratorCtx.research.sources };
+      }
+    } else if (input.searchMode !== 'off' && !shouldBypassSearch(input)) {
+      // Standard (non-Flux or trivial-Flux) search path.
       const searchKey = aifluxRoutes ? aifluxRoutes[0].key : (userKeys[input.provider] || envKeys[input.provider] || '');
       startStream(res, input.model);
       sendEvent(res, { type: 'search', phase: 'planning' });
@@ -218,19 +243,23 @@ app.post('/api/chat', rateLimit, async (req, res) => {
         model: route.model,
         aifluxRoute: input.aifluxRoute ? { ...input.aifluxRoute, provider: route.provider, model: route.model } : null,
       };
+      const orchBlock = orchestratorCtx ? orchestratorContextBlock(orchestratorCtx) : '';
       if (searchResult) {
         // withSearchContext builds its own systemPrompt via buildAssistantPrompt
-        // with searchPerformed=true; prepend the AIFLUX member addendum on top.
+        // with searchPerformed=true; prepend the AIFLUX member addendum and
+        // orchestrator context on top.
         const withCtx = withSearchContext(effectiveInput, searchResult.query, searchResult.sources);
         if (input.aifluxRoute) {
-          withCtx.systemPrompt = `${withCtx.systemPrompt}\n\n${route.memberAddendum}`;
+          withCtx.systemPrompt = `${withCtx.systemPrompt}${orchBlock}\n\n${route.memberAddendum}`;
+        } else if (orchBlock) {
+          withCtx.systemPrompt = `${withCtx.systemPrompt}${orchBlock}`;
         }
         return buildRequest(withCtx, route.key, ollamaBaseUrl);
       }
-      const systemPrompt = input.aifluxRoute
-        ? buildAssistantPrompt({ provider: route.provider, model: route.model, searchMode: input.searchMode, searchPerformed: false }) + `\n\n${route.memberAddendum}`
-        : undefined;
-      return buildRequest({ ...effectiveInput, systemPrompt }, route.key, ollamaBaseUrl);
+      const memberPrompt = input.aifluxRoute
+        ? buildAssistantPrompt({ provider: route.provider, model: route.model, searchMode: input.searchMode, searchPerformed: false }) + `${orchBlock}\n\n${route.memberAddendum}`
+        : (orchBlock ? buildAssistantPrompt({ provider: route.provider, model: route.model, searchMode: input.searchMode, searchPerformed: false }) + orchBlock : undefined);
+      return buildRequest({ ...effectiveInput, systemPrompt: memberPrompt }, route.key, ollamaBaseUrl);
     };
 
     const routes = aifluxRoutes || [{

@@ -37,6 +37,7 @@ export interface ChatMessage {
   searchSkipped?: boolean;
   searchStatus?: 'planning' | 'searching';
   searchQuery?: string;
+  phases?: Array<{ phase: string; label: string; description: string; done?: boolean }>;
   toolCalls?: Array<{ id: string; name: string; args: Record<string, string>; ok?: boolean; note?: string }>;
 }
 

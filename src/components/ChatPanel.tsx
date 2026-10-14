@@ -92,6 +92,22 @@ function ToolCallBadges({ message }: { message: ChatMessage }) {
   </div>;
 }
 
+import { CheckCircle2, Loader2 } from 'lucide-react';
+
+function PhaseProgress({ message }: { message: ChatMessage }) {
+  const phases = message.phases;
+  if (!phases || phases.length === 0) return null;
+  return <div className="message-phase-track" role="status" aria-label="AIFLUX team is working">
+    <div className="message-phase-heading"><Sparkles size={14} /><strong>FLUX ORCHESTRATOR</strong></div>
+    <ol className="message-phase-list">
+      {phases.map((p, i) => <li key={`${p.phase}-${i}`} className={p.done ? 'phase-done' : 'phase-active'}>
+        {p.done ? <CheckCircle2 size={13} /> : <Loader2 size={13} className="phase-spin" />}
+        <span><strong>{p.label}</strong><small>{p.description}</small></span>
+      </li>)}
+    </ol>
+  </div>;
+}
+
 function SearchSources({ message }: { message: ChatMessage }) {
   if (message.searchStatus) return <div className="message-search-progress" role="status"><Globe2 size={15} />{message.searchStatus === 'planning' ? 'Deciding whether live search is needed…' : `Searching the web: ${message.searchQuery || 'finding sources'}…`}</div>;
   if (message.searchSkipped) return <div className="message-search-skipped"><Globe2 size={14} /> No live web search used for this answer.</div>;
@@ -176,6 +192,7 @@ export default function ChatPanel(props: Props) {
       {messages.map((message) => <div className={`message message-${message.role}`} key={message.id}>
         <div className="message-avatar">{message.role === 'assistant' ? <FluxMark size={29} /> : <span>YOU</span>}</div>
         <div className="message-main"><div className="message-byline"><strong>{message.role === 'assistant' ? 'AIFLUX' : 'You'}</strong><span>{message.role === 'assistant' ? message.model ? message.model.split('/').at(-1)?.replace(':free', '') : 'Coding partner' : new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>
+          {message.role === 'assistant' && <PhaseProgress message={message} />}
           {message.role === 'assistant' && <SearchSources message={message} />}
           {message.role === 'assistant' && message.toolCalls?.length ? <ToolCallBadges message={message} /> : null}
           {message.role === 'assistant' && !message.content && message.status === 'streaming' ? <div className="thinking-line"><span className="thinking-dots"><i /><i /><i /></span> {message.searchStatus ? 'Checking live sources...' : 'Putting thoughts into motion...'}</div>
