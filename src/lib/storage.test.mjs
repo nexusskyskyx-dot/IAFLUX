@@ -20,11 +20,11 @@ test('migrates saved random/safety models while retaining named free chat select
     const legacy = { provider: 'openrouter', id: 'openrouter/free', name: 'Free model router', shortName: 'Auto free' };
     values.set(key, JSON.stringify(legacy));
     assert.equal(hasSavedModel(), false);
-    assert.equal(loadModel().id, 'hiku');
+    assert.equal(loadModel().id, 'flux');
     assert.equal(values.has(key), false);
 
     values.set(key, JSON.stringify({ ...legacy, id: 'nvidia/nemotron-3.5-content-safety:free' }));
-    assert.equal(loadModel().id, 'hiku');
+    assert.equal(loadModel().id, 'flux');
     assert.equal(values.has(key), false);
 
     const coding = { ...legacy, id: 'poolside/laguna-s-2.1:free', name: 'Poolside Laguna S 2.1', shortName: 'Laguna S 2.1' };
@@ -35,7 +35,7 @@ test('migrates saved random/safety models while retaining named free chat select
 
     values.set(key, JSON.stringify({ ...legacy, provider: 'unsupported', id: 'unknown' }));
     assert.equal(hasSavedModel(), false);
-    assert.equal(loadModel().id, 'hiku');
+    assert.equal(loadModel().id, 'flux');
   } finally {
     if (originalStorage === undefined) delete globalThis.localStorage;
     else globalThis.localStorage = originalStorage;

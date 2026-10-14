@@ -10,6 +10,8 @@ export const PROVIDER_URLS = Object.freeze({
   openrouter: 'https://openrouter.ai/api/v1/chat/completions',
   groq: 'https://api.groq.com/openai/v1/chat/completions',
   gemini: 'https://generativelanguage.googleapis.com/v1beta/models/',
+  pollinations: 'https://text.pollinations.ai/openai/chat/completions',
+  ovh: 'https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions',
 });
 
 export class RequestError extends Error {
@@ -27,7 +29,7 @@ export function validateChat(body, ollamaConfigured = false, aifluxResolver) {
   if (!['off', 'auto', 'always'].includes(searchMode)) {
     throw new RequestError(400, 'Choose a valid web search mode.');
   }
-  if (!['openrouter', 'gemini', 'groq', 'ollama', 'aiflux'].includes(provider)) {
+  if (!['openrouter', 'gemini', 'groq', 'ollama', 'pollinations', 'ovh', 'aiflux'].includes(provider)) {
     throw new RequestError(400, 'Choose a supported provider.');
   }
   if (typeof model !== 'string' || model.length > 180) {
@@ -56,6 +58,8 @@ export function validateChat(body, ollamaConfigured = false, aifluxResolver) {
   if (['gemini', 'groq'].includes(provider) && !catalog.some((entry) => entry.provider === provider && entry.id === model)) {
     throw new RequestError(400, 'This model is not in the supported free-tier catalog.');
   }
+  // Keyless built-in providers (pollinations / ovh) are routed by AIFLUX —
+  // accept whatever model id the resolver picks.
   if (provider === 'ollama' && (!ollamaConfigured || !/^[a-zA-Z0-9._:/-]{1,160}$/.test(model))) {
     throw new RequestError(400, 'Connect Ollama on the server and choose an installed model.');
   }
@@ -81,7 +85,8 @@ export function validateChat(body, ollamaConfigured = false, aifluxResolver) {
 
 export function buildRequest({ provider, model, messages, searchMode = 'off', searchPerformed = false, systemPrompt }, key, ollamaBaseUrl) {
   const prompt = systemPrompt || buildAssistantPrompt({ provider, model, searchMode, searchPerformed });
-  if (provider !== 'ollama' && !key) {
+  const KEYLESS = new Set(['pollinations', 'ovh']);
+  if (provider !== 'ollama' && !KEYLESS.has(provider) && !key) {
     throw new RequestError(401, `Connect your ${providerName(provider)} API key in Settings to continue.`);
   }
   if (provider === 'gemini') {
@@ -116,16 +121,17 @@ export function buildRequest({ provider, model, messages, searchMode = 'off', se
       },
     };
   }
+  // OpenAI-compatible providers (openrouter, groq, pollinations, ovh).
+  // Keyless ones send no Authorization header.
+  const headers = { 'Content-Type': 'application/json' };
+  if (!KEYLESS.has(provider)) headers.Authorization = `Bearer ${key}`;
+  if (provider === 'openrouter') headers['X-Title'] = 'AIFLUX';
   return {
     url: PROVIDER_URLS[provider],
     format: 'openai',
     options: {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${key}`,
-        ...(provider === 'openrouter' ? { 'X-Title': 'AIFLUX' } : {}),
-      },
+      headers,
       body: JSON.stringify({
         model,
         messages: [{ role: 'system', content: prompt }, ...messages],

@@ -6,10 +6,16 @@ import type { ModelInfo, Provider } from '../types';
 // listAIFluxModels() and merges them at the top of /api/models.
 const AIFLUX_FAMILY: ModelInfo[] = [
   {
+    id: 'flux', provider: 'aiflux',
+    name: 'AIFLUX Flux', shortName: 'Flux · Smart',
+    description: 'Flagship AIFLUX agent — works instantly with NO API KEY needed. Built-in free endpoints plus deep web search. Super smart general chat, reasoning, and coding.',
+    strength: 'Built-in · super smart', badge: 'DEFAULT',
+  },
+  {
     id: 'hiku', provider: 'aiflux',
     name: 'AIFLUX Hiku', shortName: 'Hiku · Coder',
-    description: 'Default AIFLUX coding agent. Picks the strongest connected free coding model and routes through it.',
-    strength: 'Smart coding', badge: 'DEFAULT',
+    description: 'Coding specialist. Picks the strongest connected free coding model and routes through it.',
+    strength: 'Smart coding', badge: 'CODER',
   },
   {
     id: 'siku', provider: 'aiflux',
@@ -43,8 +49,8 @@ export const DEFAULT_MODEL = CURATED_MODELS[0];
 export const PROVIDERS: Record<Provider, { name: string; initial: string; description: string; url: string; color: string }> = {
   aiflux: {
     name: 'AIFLUX', initial: '✳',
-    description: 'The AIFLUX family: Hiku (coder, default), Siku (thinking), Ziker (planner), Toki (live web), Zuki (vision). Routes to the best connected free model for each persona.',
-    url: '#', color: 'lime',
+    description: 'Flux (default, no key needed) — built-in free AI with deep search. Plus Hiku (coder), Siku (thinking), Ziker (planner), Toki (live web), Zuki (vision).',
+    url: '#', color: 'gold',
   },
   openrouter: {
     name: 'OpenRouter', initial: 'O',
@@ -73,7 +79,7 @@ export function modelDisplayName(modelId: string, allModels: ModelInfo[]): strin
 }
 
 export function groupModels(models: ModelInfo[]): { provider: Provider; models: ModelInfo[] }[] {
-  return (['openrouter', 'gemini', 'groq', 'ollama'] as Provider[])
+  return (['aiflux', 'openrouter', 'gemini', 'groq', 'ollama'] as Provider[])
     .map((provider) => ({ provider, models: models.filter((model) => model.provider === provider) }))
     .filter((group) => group.models.length > 0);
 }

@@ -1,5 +1,5 @@
 export type Provider = 'openrouter' | 'gemini' | 'groq' | 'ollama' | 'aiflux';
-export type AIFluxMember = 'siku' | 'hiku' | 'ziker' | 'toki' | 'zuki';
+export type AIFluxMember = 'flux' | 'siku' | 'hiku' | 'ziker' | 'toki' | 'zuki';
 export type SearchMode = 'off' | 'auto' | 'always';
 
 export interface WebSource {

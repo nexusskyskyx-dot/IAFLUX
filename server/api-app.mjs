@@ -40,7 +40,7 @@ app.get('/api/config', (_req, res) => {
     ollamaConfigured: Boolean(ollamaBaseUrl),
     searchConfigured: Boolean(envSearchKey),
     requiresAccessCode: Boolean(accessCode),
-    aifluxAvailable: Object.values(envKeys).some((k) => Boolean(k)),
+    aifluxAvailable: true, // Flux works out of the box via built-in keyless endpoints.
   });
 });
 
