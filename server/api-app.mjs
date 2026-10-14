@@ -278,9 +278,10 @@ app.post('/api/chat', rateLimit, async (req, res) => {
         lastError = err;
         continue;
       }
-      // Use a shorter timeout for keyless public endpoints so failover is
-      // fast when one is down or stalling.
-      const routeTimeoutMs = route.keyless ? 20_000 : 120_000;
+      // Tighter timeouts so users never wait on a stalled free endpoint.
+      // Keyed Groq/Gemini respond in seconds; if one stalls >30s we fail over.
+      // Keyless public endpoints get a short 15s leash.
+      const routeTimeoutMs = route.keyless ? 15_000 : 30_000;
       const routeController = new AbortController();
       const onAbort = () => routeController.abort();
       controller.signal.addEventListener('abort', onAbort);

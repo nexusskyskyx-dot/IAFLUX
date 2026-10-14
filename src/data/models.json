@@ -1,119 +1,21 @@
 [
-  {
-    "id": "gemini-3.8-flash",
-    "provider": "gemini",
-    "name": "Gemini 3.8 Flash",
-    "shortName": "Gemini 3.8",
-    "description": "Google's software-engineering-focused Flash model, with a 1M-token context window and a generous free tier via AI Studio. Strongest free starting point for coding and agent work.",
-    "strength": "Software engineering",
-    "badge": "BEST OVERALL"
-  },
-  {
-    "id": "poolside/laguna-m.1:free",
-    "provider": "openrouter",
-    "name": "Poolside Laguna M.1",
-    "shortName": "Laguna M.1",
-    "description": "Poolside's flagship agentic-coding model with 262K context, built for complex software-engineering tasks with tool calling, on OpenRouter's free variant.",
-    "strength": "Coding agent",
-    "badge": "BEST FOR CODE"
-  },
-  {
-    "id": "qwen/qwen3-coder:free",
-    "provider": "openrouter",
-    "name": "Qwen3 Coder",
-    "shortName": "Qwen3 Coder",
-    "description": "A large-context coding-specialist model, well suited to function/tool calling and long codebases on the free endpoint.",
-    "strength": "Code & tool use",
-    "badge": "CODING"
-  },
-  {
-    "id": "cohere/north-mini-code:free",
-    "provider": "openrouter",
-    "name": "Cohere North Mini Code",
-    "shortName": "North Mini Code",
-    "description": "Cohere's agentic coding model with 256K context, trained to generalize across agent harnesses like OpenCode and SWE-Agent.",
-    "strength": "Fast coding",
-    "badge": "FAST CODING"
-  },
-  {
-    "id": "openai/gpt-oss-120b",
-    "provider": "groq",
-    "name": "GPT-OSS 120B",
-    "shortName": "GPT-OSS 120B",
-    "description": "OpenAI's open-weight reasoning model served at speed by Groq's free plan. Strong on code benchmarks; subject to per-org rate limits.",
-    "strength": "Deep reasoning",
-    "badge": "GROQ FREE"
-  },
-  {
-    "id": "qwen/qwen3.6-27b",
-    "provider": "groq",
-    "name": "Qwen 3.6 27B",
-    "shortName": "Qwen 3.6",
-    "description": "A capable open code-and-reasoning model, the current Qwen serving on Groq's free plan (replaced 3.8 in September 2026).",
-    "strength": "Code & reasoning",
-    "badge": "GROQ FREE"
-  },
-  {
-    "id": "nvidia/nemotron-3-super-120b-a12b:free",
-    "provider": "openrouter",
-    "name": "NVIDIA Nemotron 3 Super 120B",
-    "shortName": "Nemotron Super",
-    "description": "A 1M-context open reasoning model from NVIDIA for architecture, analysis, and structured-output agent tasks on a free endpoint.",
-    "strength": "Long-context reasoning",
-    "badge": "FREE MODEL"
-  },
-  {
-    "id": "openai/gpt-oss-120b:free",
-    "provider": "openrouter",
-    "name": "GPT-OSS 120B (OpenRouter)",
-    "shortName": "GPT-OSS 120B OR",
-    "description": "OpenAI's open-weight 120B model served via OpenRouter's free routing, useful as a Groq fallback when Groq's per-org limits are hit.",
-    "strength": "Open reasoning",
-    "badge": "FREE MODEL"
-  },
-  {
-    "id": "gemini-2.5-pro",
-    "provider": "gemini",
-    "name": "Gemini 2.5 Pro",
-    "shortName": "Gemini Pro",
-    "description": "The only Pro-class Gemini model on the free tier (≈50 req/day). Stronger reasoning than Flash; keep Flash for high-volume iterations.",
-    "strength": "Strong reasoning",
-    "badge": "FREE TIER"
-  },
-  {
-    "id": "gemini-2.5-flash",
-    "provider": "gemini",
-    "name": "Gemini 2.5 Flash",
-    "shortName": "Gemini Flash",
-    "description": "Google's versatile free-tier model with 1M context. Reliable fallback for building and explaining code when 3.8 Flash hits quota.",
-    "strength": "Everyday building",
-    "badge": "FREE TIER"
-  },
-  {
-    "id": "openai/gpt-oss-20b",
-    "provider": "groq",
-    "name": "GPT-OSS 20B",
-    "shortName": "GPT-OSS 20B",
-    "description": "A smaller, fast open-weight reasoning model for focused coding tasks on Groq's free plan.",
-    "strength": "Fast reasoning",
-    "badge": "GROQ FREE"
-  },
-  {
-    "id": "poolside/laguna-xs.2:free",
-    "provider": "openrouter",
-    "name": "Poolside Laguna XS.2",
-    "shortName": "Laguna XS.2",
-    "description": "A lighter Poolside coding agent for responsive, lower-latency edits on OpenRouter's free variant.",
-    "strength": "Fast coding",
-    "badge": "FREE MODEL"
-  },
-  {
-    "id": "gemini-2.5-flash-lite",
-    "provider": "gemini",
-    "name": "Gemini 2.5 Flash-Lite",
-    "shortName": "Flash-Lite",
-    "description": "Google's lightweight free-tier option for quick questions, extraction, and fast iterations.",
-    "strength": "Quick iterations",
-    "badge": "FREE TIER"
-  }
+  { "provider": "gemini", "id": "gemini-3.8-flash", "name": "Google Gemini 3.8 Flash", "shortName": "Gemini 3.8 Flash", "description": "Google's latest fast free model. Strong coding, tool use, multimodal input, and long context.", "strength": "Fast + smart", "badge": "BEST" },
+  { "provider": "gemini", "id": "gemini-2.5-pro", "name": "Google Gemini 2.5 Pro", "shortName": "Gemini 2.5 Pro", "description": "Google's larger reasoning model on the free tier (capped daily). Use for harder architecture and debug questions.", "strength": "Deep reasoning", "badge": "PRO" },
+  { "provider": "gemini", "id": "gemini-2.5-flash", "name": "Google Gemini 2.5 Flash", "shortName": "Gemini 2.5 Flash", "description": "Fast, reliable free Flash model with solid coding and tool-calling.", "strength": "Reliable", "badge": "FREE" },
+  { "provider": "gemini", "id": "gemini-2.5-flash-lite", "name": "Google Gemini 2.5 Flash-Lite", "shortName": "Flash-Lite", "description": "Lightest Gemini Flash, highest free quota — great fallback.", "strength": "High quota", "badge": "FREE" },
+  { "provider": "groq", "id": "openai/gpt-oss-120b", "name": "GPT-OSS 120B (Groq)", "shortName": "GPT-OSS 120B", "description": "OpenAI's 120B open model on Groq's LPUs — very fast, strong coder.", "strength": "Ultra-fast", "badge": "BEST" },
+  { "provider": "groq", "id": "qwen/qwen3.6-27b", "name": "Qwen 3.6 27B (Groq)", "shortName": "Qwen 3.6", "description": "Alibaba Qwen 3.6 27B dense model on Groq. Strong reasoning and multilingual.", "strength": "Balanced", "badge": "FREE" },
+  { "provider": "groq", "id": "openai/gpt-oss-20b", "name": "GPT-OSS 20B (Groq)", "shortName": "GPT-OSS 20B", "description": "Fastest GPT-OSS size on Groq. Tops small-code benchmarks at $0.", "strength": "Fastest", "badge": "FREE" },
+  { "provider": "openrouter", "id": "qwen/qwen3-coder:free", "name": "Qwen3 Coder", "shortName": "Qwen3 Coder", "description": "Top free coding model on OpenRouter, 1M-token context, strong tool use.", "strength": "Best free coder", "badge": "BEST" },
+  { "provider": "openrouter", "id": "deepseek/deepseek-r1:free", "name": "DeepSeek R1", "shortName": "DeepSeek R1", "description": "DeepSeek's flagship reasoning model with chain-of-thought — near-Claude on MATH/reasoning benchmarks.", "strength": "Deep reasoning", "badge": "REASON" },
+  { "provider": "openrouter", "id": "nvidia/nemotron-3-ultra-550b-a55b:free", "name": "Nemotron 3 Ultra 550B", "shortName": "Nemotron Ultra", "description": "NVIDIA's 550B MoE free model with 1M-token context window. Strong long-context agent work.", "strength": "Long context", "badge": "BIG" },
+  { "provider": "openrouter", "id": "nvidia/nemotron-3-super-120b-a12b:free", "name": "Nemotron 3 Super 120B", "shortName": "Nemotron Super", "description": "NVIDIA's 120B free reasoning model. Strong agentic tool use.", "strength": "Reasoning", "badge": "FREE" },
+  { "provider": "openrouter", "id": "poolside/laguna-m.1:free", "name": "Poolside Laguna M.1", "shortName": "Laguna M.1", "description": "Poolside's mid-size agentic coding model purpose-built for code edit loops.", "strength": "Code edits", "badge": "FREE" },
+  { "provider": "openrouter", "id": "qwen/qwen3-next-80b-a3b-instruct:free", "name": "Qwen3 Next 80B", "shortName": "Qwen3 Next", "description": "Qwen3 Next 80B MoE on OpenRouter free — strong general + code.", "strength": "Balanced", "badge": "FREE" },
+  { "provider": "openrouter", "id": "openai/gpt-oss-120b:free", "name": "GPT-OSS 120B", "shortName": "GPT-OSS 120B (OR)", "description": "OpenAI's 120B open model on OpenRouter free tier.", "strength": "Strong", "badge": "FREE" },
+  { "provider": "openrouter", "id": "meta-llama/llama-3.3-70b-instruct:free", "name": "Llama 3.3 70B", "shortName": "Llama 3.3 70B", "description": "Meta's Llama 3.3 70B — reliable general-purpose open model.", "strength": "General", "badge": "FREE" },
+  { "provider": "openrouter", "id": "cohere/north-mini-code:free", "name": "Cohere North Mini Code", "shortName": "North Mini Code", "description": "Cohere's compact coding model optimized for fast agentic code edits.", "strength": "Fast code", "badge": "FREE" },
+  { "provider": "openrouter", "id": "poolside/laguna-xs.2:free", "name": "Poolside Laguna XS.2", "shortName": "Laguna XS", "description": "Poolside's smallest coding agent model, very fast for small edits.", "strength": "Fast edits", "badge": "FREE" },
+  { "provider": "openrouter", "id": "openai/gpt-oss-20b:free", "name": "GPT-OSS 20B", "shortName": "GPT-OSS 20B (OR)", "description": "OpenAI's 20B open model on OpenRouter — fast small coding benchmark leader.", "strength": "Fast", "badge": "FREE" },
+  { "provider": "openrouter", "id": "google/gemma-4-31b-it:free", "name": "Gemma 4 31B", "shortName": "Gemma 4 31B", "description": "Google Gemma 4 31B — multimodal (text+image+video) free tier.", "strength": "Multimodal", "badge": "VISION" }
 ]

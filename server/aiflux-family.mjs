@@ -96,72 +96,108 @@ export const AIFLUX_MEMBERS = Object.freeze({
 // endpoints are always available (no key needed) and are tried first for Flux.
 const CANDIDATES = Object.freeze({
   flux: [
-    // User-connected keys are tried FIRST when available — these are reliable,
-    // high-quality free models the user explicitly configured. The keyless
-    // public endpoints act as the built-in zero-config fallback so Flux works
-    // for visitors without any keys, but they sit behind user keys because
-    // anonymous public tiers are less reliable (rate limits, SSE quirks,
-    // occasional "invalid or omitted terminal usage" style errors).
-    { provider: 'gemini', model: 'gemini-3.8-flash' },
-    { provider: 'groq', model: 'openai/gpt-oss-120b' },
-    { provider: 'openrouter', model: 'openai/gpt-oss-120b:free' },
-    { provider: 'openrouter', model: 'nvidia/nemotron-3-super-120b-a12b:free' },
-    { provider: 'openrouter', model: 'poolside/laguna-m.1:free' },
-    { provider: 'openrouter', model: 'cohere/north-mini-code:free' },
-    { provider: 'groq', model: 'qwen/qwen3.6-27b' },
-    { provider: 'gemini', model: 'gemini-2.5-flash' },
-    { provider: 'groq', model: 'openai/gpt-oss-20b' },
+    // Priority ordering: strongest-free-and-fast first, with multi-route
+    // failover. Keyed providers are placed above keyless public endpoints
+    // because they are far more reliable, faster, and smarter — Flux should
+    // never wait on a shaky anonymous tier when a real key is available.
+    // Within each tier we prefer models known for coding + tool use + speed.
+    //
+    // Tier 1 — User-keyed providers (fastest, most reliable).
+    { provider: 'gemini', model: 'gemini-3.8-flash' },        // ~98 tok/s, strong coder
+    { provider: 'groq', model: 'openai/gpt-oss-120b' },       // 271 tok/s, 97% pass on coding bench
+    { provider: 'groq', model: 'qwen/qwen3.6-27b' },          // fast, strong
+    { provider: 'groq', model: 'openai/gpt-oss-20b' },        // fastest on Groq
+    { provider: 'gemini', model: 'gemini-2.5-flash' },        // reliable free fallback
     { provider: 'gemini', model: 'gemini-2.5-flash-lite' },
-    // Built-in keyless public free endpoints — no API key needed from user.
-    // These always work as a last resort, even for first-time visitors who
-    // never opened Settings. They're less reliable than keyed tiers, so the
-    // chat handler transparently fails over between them on errors/empty
-    // streams.
+    //
+    // Tier 2 — OpenRouter :free models, ranked by SWE-bench / LiveCodeBench
+    // strength. The strongest free coding/reasoning models currently
+    // published; rotate if any rotate off free.
+    { provider: 'openrouter', model: 'qwen/qwen3-coder:free' },       // #1 free coder, 1M ctx, tool use
+    { provider: 'openrouter', model: 'deepseek/deepseek-r1:free' },   // #1 free reasoning
+    { provider: 'openrouter', model: 'nvidia/nemotron-3-ultra-550b-a55b:free' }, // 550B, 1M ctx
+    { provider: 'openrouter', model: 'nvidia/nemotron-3-super-120b-a12b:free' },
+    { provider: 'openrouter', model: 'openai/gpt-oss-120b:free' },
+    { provider: 'openrouter', model: 'poolside/laguna-m.1:free' },
+    { provider: 'openrouter', model: 'qwen/qwen3-next-80b-a3b-instruct:free' },
+    { provider: 'openrouter', model: 'meta-llama/llama-3.3-70b-instruct:free' },
+    { provider: 'openrouter', model: 'cohere/north-mini-code:free' },
+    { provider: 'openrouter', model: 'poolside/laguna-xs.2:free' },
+    { provider: 'openrouter', model: 'openai/gpt-oss-20b:free' },
+    { provider: 'openrouter', model: 'google/gemma-4-31b-it:free' },
+    //
+    // Tier 3 — Built-in keyless public endpoints (zero-config fallback for
+    // first-time visitors). These are last because anonymous tiers are
+    // slower, more rate-limited, and occasionally return malformed SSE;
+    // the multi-route failover silently retries them.
     { provider: 'pollinations', model: 'openai' },
     { provider: 'ovh', model: 'mistralai/Mistral-Nemo-Instruct-2407' },
     { provider: 'ovh', model: 'meta-llama/Llama-3.3-70B-Instruct' },
   ],
   hiku: [
+    // Hiku is the coding specialist. Rank by SWE-bench / LiveCodeBench.
+    { provider: 'groq', model: 'openai/gpt-oss-120b' },       // 271 tok/s, 97% pass
     { provider: 'gemini', model: 'gemini-3.8-flash' },
-    { provider: 'openrouter', model: 'poolside/laguna-m.1:free' },
     { provider: 'openrouter', model: 'qwen/qwen3-coder:free' },
+    { provider: 'openrouter', model: 'poolside/laguna-m.1:free' },
     { provider: 'openrouter', model: 'cohere/north-mini-code:free' },
-    { provider: 'groq', model: 'openai/gpt-oss-120b' },
-    { provider: 'openrouter', model: 'openai/gpt-oss-120b:free' },
     { provider: 'groq', model: 'qwen/qwen3.6-27b' },
+    { provider: 'openrouter', model: 'openai/gpt-oss-120b:free' },
+    { provider: 'openrouter', model: 'qwen/qwen3-next-80b-a3b-instruct:free' },
     { provider: 'gemini', model: 'gemini-2.5-flash' },
     { provider: 'groq', model: 'openai/gpt-oss-20b' },
+    { provider: 'openrouter', model: 'poolside/laguna-xs.2:free' },
+    { provider: 'openrouter', model: 'openai/gpt-oss-20b:free' },
     { provider: 'gemini', model: 'gemini-2.5-flash-lite' },
   ],
   siku: [
-    { provider: 'groq', model: 'openai/gpt-oss-120b' },
+    // Siku is the reasoning agent. Prioritize reasoning specialists (DeepSeek
+    // R1, Nemotron Ultra/Super) and the fastest general smart models.
+    { provider: 'openrouter', model: 'deepseek/deepseek-r1:free' },
+    { provider: 'openrouter', model: 'nvidia/nemotron-3-ultra-550b-a55b:free' },
     { provider: 'openrouter', model: 'nvidia/nemotron-3-super-120b-a12b:free' },
+    { provider: 'groq', model: 'openai/gpt-oss-120b' },
     { provider: 'openrouter', model: 'openai/gpt-oss-120b:free' },
     { provider: 'gemini', model: 'gemini-3.8-flash' },
+    { provider: 'gemini', model: 'gemini-2.5-pro' },
     { provider: 'groq', model: 'qwen/qwen3.6-27b' },
+    { provider: 'openrouter', model: 'meta-llama/llama-3.3-70b-instruct:free' },
     { provider: 'gemini', model: 'gemini-2.5-flash' },
   ],
   ziker: [
-    { provider: 'openrouter', model: 'cohere/north-mini-code:free' },
+    // Ziker is the planner. Strong structured-output / instruction-following
+    // models first; fast compact models are fine since plans are short.
     { provider: 'gemini', model: 'gemini-3.8-flash' },
     { provider: 'groq', model: 'openai/gpt-oss-20b' },
-    { provider: 'openrouter', model: 'poolside/laguna-xs.2:free' },
-    { provider: 'gemini', model: 'gemini-2.5-flash' },
+    { provider: 'openrouter', model: 'cohere/north-mini-code:free' },
     { provider: 'groq', model: 'openai/gpt-oss-120b' },
+    { provider: 'openrouter', model: 'qwen/qwen3-next-80b-a3b-instruct:free' },
+    { provider: 'openrouter', model: 'poolside/laguna-xs.2:free' },
+    { provider: 'groq', model: 'qwen/qwen3.6-27b' },
+    { provider: 'gemini', model: 'gemini-2.5-flash' },
+    { provider: 'openrouter', model: 'openai/gpt-oss-120b:free' },
   ],
   toki: [
+    // Toki does web-search planning. Needs reliable structured output and
+    // fast response — Gemini 3.8 Flash is ideal, then fast Groq models.
     { provider: 'gemini', model: 'gemini-3.8-flash' },
     { provider: 'groq', model: 'openai/gpt-oss-120b' },
+    { provider: 'groq', model: 'openai/gpt-oss-20b' },
     { provider: 'openrouter', model: 'cohere/north-mini-code:free' },
-    { provider: 'gemini', model: 'gemini-2.5-flash' },
+    { provider: 'openrouter', model: 'qwen/qwen3-next-80b-a3b-instruct:free' },
     { provider: 'groq', model: 'qwen/qwen3.6-27b' },
+    { provider: 'gemini', model: 'gemini-2.5-flash' },
+    { provider: 'openrouter', model: 'meta-llama/llama-3.3-70b-instruct:free' },
   ],
   zuki: [
+    // Multimodal vision routing. Gemma 4 31B and Gemini Flash families accept
+    // images on the free tier.
     { provider: 'gemini', model: 'gemini-3.8-flash', vision: true },
     { provider: 'gemini', model: 'gemini-2.5-flash', vision: true },
     { provider: 'gemini', model: 'gemini-2.5-flash-lite', vision: true },
-    { provider: 'openrouter', model: 'openai/gpt-oss-120b:free' },
+    { provider: 'openrouter', model: 'google/gemma-4-31b-it:free', vision: true },
     { provider: 'groq', model: 'openai/gpt-oss-120b' },
+    { provider: 'openrouter', model: 'openai/gpt-oss-120b:free' },
     { provider: 'gemini', model: 'gemini-3.8-flash' },
   ],
 });

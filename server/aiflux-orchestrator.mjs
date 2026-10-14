@@ -23,14 +23,17 @@ import { searchWeb } from './search.mjs';
 import { buildAssistantPrompt } from './assistant-profile.mjs';
 import { memberInfo, resolveAIFluxRoutes, KEYLESS_PROVIDERS } from './aiflux-family.mjs';
 
-// Max per-sub-agent wall time. Kept short so the whole orchestration stays
-// snappy even when one route flakes.
-const PHASE_TIMEOUT_MS = 25_000;
-const KEYLESS_PHASE_TIMEOUT_MS = 12_000;
+// Max per-sub-agent wall time. Kept SHORT so orchestration stays snappy even
+// if a model is slow to start streaming (the multi-route failover will jump
+// to the next model on this timeout). Keyed models (Gemini/Groq) are
+// consistently fast so they get the shorter budget; keyless public endpoints
+// are slower/unpredictable so they get a slightly longer leash but still
+// fail over quickly.
+const PHASE_TIMEOUT_MS = 12_000;
+const KEYLESS_PHASE_TIMEOUT_MS = 8_000;
 
-// Upper bound on sub-agent reply length — we don't need novels in internal
-// handoffs, just concrete actionable output.
-const PHASE_MAX_CHARS = 6_000;
+// Upper bound on sub-agent reply length. Internal handoffs should be tight.
+const PHASE_MAX_CHARS = 4_000;
 
 // Phases the orchestrator can run, in order. The set of phases actually used
 // depends on classifyRequest() — trivial/greeting/code-review-only requests
@@ -155,61 +158,65 @@ export async function runOrchestrator({ question, userKeys, envKeys, ollamaConfi
   const phases = classifyRequest(question);
   const result = { plan: null, research: null, code: null, review: null };
 
-  // Phase 1 — Ziker the planner.
+  // PHASE 1 + 2 run in parallel: Ziker plans while Toki researches. These are
+  // independent (Toki's search query is derived directly from the user's
+  // request, not from Ziker's plan) so running them together cuts orchestration
+  // latency in half.
+  const parallelTasks = [];
+
   if (phases.plan && !signal?.aborted) {
     sendEvent({ type: 'phase', phase: 'planning', label: PHASES.plan.label, description: PHASES.plan.description });
-    const planResult = await callMember('ziker', [{
-      role: 'user',
-      content: `Break the following user request into 3–6 concrete, ordered build steps. Keep each step to one sentence, focused on files to create/change and implementation order. Do not write code yet.\n\nUser request:\n${question}`,
-    }], { userKeys, envKeys, ollamaConfigured, signal });
-    if (planResult) result.plan = planResult;
+    parallelTasks.push(
+      callMember('ziker', [{
+        role: 'user',
+        content: `Break this request into 3-6 ordered build steps. One sentence per step, focused on files to create/change. No code.\n\nRequest:\n${question}`,
+      }], { userKeys, envKeys, ollamaConfigured, signal }).then((r) => { result.plan = r; })
+    );
   }
 
-  // Phase 2 — Toki live web research (uses actual web search, not just the
-  // model, so sources stay grounded and current).
   if (phases.search && !signal?.aborted) {
     sendEvent({ type: 'phase', phase: 'research', label: PHASES.search.label, description: PHASES.search.description });
-    const query = await (async () => {
-      // Ask Toki for a focused search query, with failover.
+    parallelTasks.push((async () => {
       const q = await callMember('toki', [{
         role: 'user',
-        content: `Given this user request, produce ONE short web-search query (max 12 words) to find the latest, most relevant information. Reply with only the query, nothing else.\n\nUser request:\n${question}`,
+        content: `Produce ONE short web-search query (max 12 words) for this request. Reply with only the query.\n\nRequest:\n${question}`,
       }], { userKeys, envKeys, ollamaConfigured, signal });
-      return q?.text?.replace(/^["']|["']$/g, '').trim().slice(0, 180) || question.slice(0, 180);
-    })();
-    try {
-      const sources = await searchWeb(query, searchCfg.searchKey || searchCfg.envSearchKey, { signal });
-      if (sources?.length) result.research = { query, sources, member: 'toki' };
-    } catch {
-      // Search failure is non-fatal; fall through to code/review without it.
-    }
+      const query = (q?.text || question).replace(/^["']|["']$/g, '').trim().slice(0, 180);
+      try {
+        const sources = await searchWeb(query, searchCfg.searchKey || searchCfg.envSearchKey, { signal });
+        if (sources?.length) result.research = { query, sources, member: 'toki' };
+      } catch { /* search failure non-fatal */ }
+    })());
   }
 
-  // Phase 3 — Hiku the coder.
+  await Promise.all(parallelTasks);
+  if (signal?.aborted) return result;
+
+  // PHASE 3 — Hiku codes, using plan + research if available.
   if (phases.code && !signal?.aborted) {
     sendEvent({ type: 'phase', phase: 'coding', label: PHASES.code.label, description: PHASES.code.description });
     const hikuPrompt = [
-      `User request:\n${question}`,
-      result.plan ? `\nPlan from Ziker:\n${result.plan.text}` : '',
+      `Request:\n${question}`,
+      result.plan ? `\nPlan:\n${result.plan.text}` : '',
       result.research?.sources?.length
-        ? `\nLive web sources from Toki:\n${result.research.sources.map((s, i) => `[${i + 1}] ${s.title} — ${s.url}\n${s.snippet}`).join('\n\n')}`
+        ? `\nSources:\n${result.research.sources.map((s, i) => `[${i + 1}] ${s.title} — ${s.url}\n${s.snippet}`).join('\n\n')}`
         : '',
-      `\nWrite the implementation. Use the Canvas tools (<af-tool name="...">) to create/edit files directly. Produce complete, runnable code. Be concise after the tool calls.`,
+      `\nWrite the implementation. Use <af-tool name="..."> Canvas tools to create/edit files directly. Produce complete, runnable code.`,
     ].join('\n');
     const codeResult = await callMember('hiku', [{ role: 'user', content: hikuPrompt }], { userKeys, envKeys, ollamaConfigured, signal });
     if (codeResult) result.code = codeResult;
   }
 
-  // Phase 4 — Siku the reviewer.
+  // PHASE 4 — Siku reviews Hiku's draft.
   if (phases.review && result.code && !signal?.aborted) {
     sendEvent({ type: 'phase', phase: 'reviewing', label: PHASES.review.label, description: PHASES.review.description });
     const reviewResult = await callMember('siku', [{
       role: 'user',
       content: [
-        `User request:\n${question}`,
+        `Request:\n${question}`,
         result.plan ? `\nPlan:\n${result.plan.text}` : '',
-        `\nHiku's draft output (may include <af-tool> Canvas edit calls):\n${result.code.text}`,
-        `\nReview this for bugs, security issues, missing error handling, and alignment with the request. If it is correct, reply with exactly "OK". If you find issues, produce a corrected version of any code or <af-tool> calls that need changes, plus a one-paragraph summary of what you fixed.`,
+        `\nDraft:\n${result.code.text}`,
+        `\nReview for bugs, security issues, missing error handling. If correct reply exactly "OK". Otherwise produce corrected <af-tool> calls plus a short fix summary.`,
       ].join('\n'),
     }], { userKeys, envKeys, ollamaConfigured, signal });
     if (reviewResult && !/^ok[.!]?$/i.test(reviewResult.text.trim())) {
