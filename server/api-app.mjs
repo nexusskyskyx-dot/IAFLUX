@@ -7,7 +7,7 @@ import {
   RequestError, validateChat, buildRequest, friendlyUpstreamError,
   readSSE, readLines, extractChunk, getFreeOpenRouterModels,
 } from './providers.mjs';
-import { planWebSearch, searchWeb, withSearchContext } from './search.mjs';
+import { planWebSearch, searchWeb, shouldBypassSearch, withSearchContext } from './search.mjs';
 import { listAIFluxModels, memberInfo, resolveAIFluxRoute } from './aiflux-family.mjs';
 import { buildAssistantPrompt } from './assistant-profile.mjs';
 
@@ -163,7 +163,7 @@ app.post('/api/chat', rateLimit, async (req, res) => {
     // Check the model connection before making any search calls.
     let { url, options, format } = buildRequest({ ...input, systemPrompt: personaSystemPrompt }, key, ollamaBaseUrl);
     timeout = setTimeout(() => controller.abort(new Error('timeout')), 120_000);
-    if (input.searchMode !== 'off') {
+    if (input.searchMode !== 'off' && !shouldBypassSearch(input)) {
       startStream(res, input.model);
       sendEvent(res, { type: 'search', phase: 'planning' });
       const query = await planWebSearch(input, key, ollamaBaseUrl, { signal: controller.signal });

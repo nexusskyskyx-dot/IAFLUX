@@ -200,7 +200,10 @@ export default function App() {
     const initialFiles = activeChat.files;
     const userMessage: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: text, createdAt: now, attachments };
     const assistantId = crypto.randomUUID();
-    const forcedSearch = selectedModel.provider === 'aiflux' && (selectedModel.id === 'toki' || selectedModel.id === 'flux');
+    // Toki is the dedicated live-web persona and forces search even when the
+    // user left the toggle off. Flux gets normal auto behavior — the server
+    // decides turn-by-turn whether current facts matter.
+    const forcedSearch = selectedModel.provider === 'aiflux' && selectedModel.id === 'toki';
     const effectiveSearchMode: SearchMode = forcedSearch && searchMode === 'off' ? 'auto' : searchMode;
     const assistantMessage: ChatMessage = { id: assistantId, role: 'assistant', content: '', createdAt: now, status: 'streaming', model: selectedModel.name, toolCalls: [], ...(effectiveSearchMode !== 'off' ? { searchStatus: 'planning' } : {}) };
     const firstPassHistory = buildProviderMessages([...activeChat.messages, userMessage], initialFiles);

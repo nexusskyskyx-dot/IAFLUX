@@ -23,9 +23,17 @@ const TOOL = {
 export { SEARCH_SYSTEM_NOTE } from './assistant-profile.mjs';
 
 function latestQuestion(input) {
-  // File attachments appended by the client can contain proprietary code.
-  const content = input.messages.at(-1)?.content || '';
-  return content.split(/\n\nAttached file:/i)[0].replace(/```[\s\S]*?```/g, '[code omitted]').trim().slice(0, 900);
+  // File attachments appended by the client can contain proprietary code, and
+  // the client also appends a <canvas-workspace> snapshot block to the last
+  // user message. Strip that snapshot (and any attached file blocks) so the
+  // web-search planner only sees the user's actual question.
+  const raw = input.messages.at(-1)?.content || '';
+  const content = raw
+    .replace(/\n?<canvas-workspace>[\s\S]*?<\/canvas-workspace>/g, '')
+    .split(/\n\nAttached file:/i)[0]
+    .replace(/```[\s\S]*?```/g, '[code omitted]')
+    .trim();
+  return content.slice(0, 900);
 }
 
 export function normalizeSearchQuery(value) {
@@ -37,8 +45,33 @@ export function normalizeSearchQuery(value) {
   return query;
 }
 
+// Bare greetings / social pleasantries / one-word affirmations that never need
+// live web search, no matter what the user's search toggle says.
+const TRIVIAL_RE = /^(?:hi+|hello+|hey+|yo+|sup+\b|hola|howdy|good\s+(?:morning|afternoon|evening|day|night)|thanks?(?:\s+(?:you|so\s+much|a\s+lot))?|thank\s+you|thx|ty|ok(?:ay)?|okie|sure|yes+|yeah?|yep|no+|nah?|nope|nice+|cool+|awesome|great|amazing|got\s*it|gotcha|i\s*see|right|k\.?|kk|bye+|cya|see\s*(?:ya|you)|goodbye|test(?:ing)?|\?+|\!+\.)[!.?\s]*$/i;
+
+function isConversationalTrivia(question) {
+  if (typeof question !== 'string') return true;
+  const trimmed = question.trim();
+  if (trimmed.length < 3) return true;
+  if (trimmed.length < 16 && TRIVIAL_RE.test(trimmed)) return true;
+  return false;
+}
+
+// Decide, before emitting any planning UI, whether this message is obviously
+// trivial (bare greeting / one-word reply) so we can skip web search entirely
+// without showing the "Searching…" spinner. Exported so the chat handler can
+// short-circuit the entire search branch for those cases.
+export function shouldBypassSearch(input) {
+  if (input.searchMode === 'off') return true;
+  if (input.searchMode === 'always') return false;
+  return isConversationalTrivia(latestQuestion(input));
+}
+
 export function likelyNeedsSearch(question) {
-  return /\b(?:search|look up|find online|browse|web|internet|today|tonight|yesterday|tomorrow|latest|recent|current|right now|this week|this month|news|weather|price|release|updated|up.to.date|as of|202[5-9])\b/i.test(question);
+  if (typeof question !== 'string') return false;
+  const trimmed = question.trim();
+  if (isConversationalTrivia(trimmed)) return false;
+  return /\b(?:search|look up|find online|browse|web|internet|today|tonight|yesterday|tomorrow|latest|recent|current|right now|this week|this month|news|weather|price|release|updated|up.to.date|as of|202[5-9]|how\s+much|where\s+can|documentation|docs)\b/i.test(trimmed);
 }
 
 export function buildSearchPlanRequest(input, key, ollamaBaseUrl, now = new Date()) {
@@ -84,7 +117,15 @@ export function parseSearchDecision(provider, payload) {
 export async function planWebSearch(input, key, ollamaBaseUrl, { signal, fetchImpl = fetch } = {}) {
   const question = latestQuestion(input);
   const fallback = normalizeSearchQuery(question.replace(/\s+/g, ' ').slice(0, 180));
-  const useFallback = () => input.searchMode === 'always' || likelyNeedsSearch(question) ? fallback : null;
+  const needs = likelyNeedsSearch(question);
+  const useFallback = () => input.searchMode === 'always' || needs ? fallback : null;
+  // In auto mode, bail out EARLY if the question looks like a plain greeting or
+  // trivial conversational message — don't even call the planner. This matters
+  // for keyless free models that don't support function calling: a confused
+  // response could otherwise get parsed as a "query" and send a nonsense
+  // search. (We still call the planner for substantive non-search questions
+  // like "Build a button" so it can return NO_SEARCH explicitly.)
+  if (input.searchMode === 'auto' && !needs && isConversationalTrivia(question)) return null;
   const plan = buildSearchPlanRequest(input, key, ollamaBaseUrl);
   try {
     const response = await fetchImpl(plan.url, {
