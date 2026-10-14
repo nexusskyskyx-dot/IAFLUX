@@ -25,10 +25,11 @@ export function validateChat(body, ollamaConfigured = false, aifluxResolver) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     throw new RequestError(400, 'Invalid request.');
   }
-  let { provider, model, messages, searchMode = 'off' } = body;
+  let { provider, model, messages, searchMode = 'off', effort = 'auto' } = body;
   if (!['off', 'auto', 'always'].includes(searchMode)) {
     throw new RequestError(400, 'Choose a valid web search mode.');
   }
+  if (!['fast', 'auto', 'power'].includes(effort)) effort = 'auto';
   if (!['openrouter', 'gemini', 'groq', 'ollama', 'pollinations', 'ovh', 'aiflux'].includes(provider)) {
     throw new RequestError(400, 'Choose a supported provider.');
   }
@@ -78,7 +79,7 @@ export function validateChat(body, ollamaConfigured = false, aifluxResolver) {
     throw new RequestError(400, 'Conversation is too long or does not end with a user message. Start a new chat or shorten the context.');
   }
   return {
-    provider, model, messages: cleanMessages, searchMode,
+    provider, model, messages: cleanMessages, searchMode, effort,
     ...(aifluxRoute ? { aifluxRoute } : {}),
   };
 }

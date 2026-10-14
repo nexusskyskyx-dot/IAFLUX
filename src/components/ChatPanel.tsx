@@ -1,8 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ArrowRight, ArrowUpRight, Braces, Check, ChevronDown, Code2, Copy, Eye, FileCode2, FilePlus2, FolderOpen, Globe2, Lightbulb, Pencil, Square, Paperclip, Send, Sparkles, Trash2, WandSparkles, X } from 'lucide-react';
+import { ArrowRight, ArrowUpRight, Braces, Check, ChevronDown, Code2, Copy, Eye, FileCode2, FilePlus2, FolderOpen, Gauge, Globe2, Lightbulb, Pencil, Square, Paperclip, Send, Sparkles, Trash2, WandSparkles, X, Zap } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { AttachedFile, ChatMessage, Conversation, ModelInfo, Provider, SearchMode } from '../types';
+import type { AttachedFile, ChatMessage, Conversation, EffortMode, ModelInfo, Provider, SearchMode } from '../types';
 import { FluxMark, ProviderIcon } from './Brand';
 import ModelPicker from './ModelPicker';
 import { normalizeMarkdown } from '../lib/normalize-markdown';
@@ -15,7 +15,9 @@ interface Props {
   connected: boolean;
   sending: boolean;
   searchMode: SearchMode;
+  effort?: EffortMode;
   onCycleSearchMode: () => void;
+  onCycleEffort?: () => void;
   contextFile: AttachedFile | null;
   isConnected: (provider: Provider) => boolean;
   onSend: (text: string, attachments: AttachedFile[]) => boolean;
@@ -136,6 +138,7 @@ export default function ChatPanel(props: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
   const messages = props.conversation.messages;
+  const effort = props.effort || 'auto';
 
   useEffect(() => { setDraft(''); setFiles([]); stickToBottom.current = true; }, [props.conversation.id]);
   useLayoutEffect(() => {
@@ -178,6 +181,11 @@ export default function ChatPanel(props: Props) {
     navigator.clipboard.writeText(message.content).then(() => { setCopiedId(message.id); window.setTimeout(() => setCopiedId(null), 1800); }).catch(() => props.onNotify('Could not copy to clipboard'));
   };
   const nextSearchMode = { off: 'Auto', auto: 'Always', always: 'Off' }[props.searchMode];
+  const effortMeta = {
+    fast:   { label: 'Fast',   icon: <Zap size={15} />,    hint: 'Quick answers, minimal orchestration.' },
+    auto:   { label: 'Smart',  icon: <Sparkles size={15} />, hint: 'AIFLUX coordinates the team when needed.' },
+    power:  { label: 'Power',  icon: <Gauge size={15} />,   hint: 'Deep reasoning, multi-query research, thorough review.' },
+  }[effort];
 
   return <div className={`chat-panel ${messages.length ? 'has-messages' : ''}`}>
     {messages.length === 0 ? <div className="hero-scroll"><div className="welcome">
@@ -211,11 +219,11 @@ export default function ChatPanel(props: Props) {
       <div className={`composer ${props.sending ? 'composer-sending' : ''}`}>
         {attached.length > 0 && <div className="composer-attachments">{attached.map((file, index) => <span key={`${file.name}-${index}`}><FileCode2 size={14} /> <span>{file.name}</span> <button onClick={() => index < files.length ? setFiles((previous) => previous.filter((_, fileIndex) => fileIndex !== index)) : props.onClearContext()} aria-label={`Remove ${file.name}`}><X size={13} /></button></span>)}</div>}
         <textarea ref={textRef} value={draft} onChange={(event) => { setDraft(event.target.value); event.target.style.height = 'auto'; event.target.style.height = `${Math.min(event.target.scrollHeight, 160)}px`; }} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send(); } }} placeholder="Ask anything, or tell me what you want to build..." aria-label="Message AIFLUX" rows={2} maxLength={30_000} />
-        <div className="composer-toolbar"><div className="composer-tools"><input ref={fileInput} type="file" hidden multiple accept=".txt,.md,.js,.jsx,.ts,.tsx,.json,.html,.css,.scss,.py,.sh,.svg,.xml,.yaml,.yml,.sql,.java,.go,.rs" onChange={(event) => void attachFiles(event.target.files)} /><button className="composer-attach" onClick={() => fileInput.current?.click()} title="Attach a code or text file" aria-label="Attach a file"><Paperclip size={18} strokeWidth={1.7} /></button><span className="toolbar-divider" /><button className="model-trigger" onClick={() => { if (!pickerOpen) props.onLoadModels(); setPickerOpen((open) => !open); }} aria-expanded={pickerOpen} aria-label={`Select model: ${props.selectedModel.name}`}><ProviderIcon provider={props.selectedModel.provider} size="small" /><span className="model-trigger-name">{props.selectedModel.shortName}</span><span className={`model-trigger-status ${props.isConnected(props.selectedModel.provider) ? 'ready' : ''}`} /><ChevronDown size={15} /></button><span className="toolbar-divider" /><button type="button" className={`composer-search composer-search-${props.searchMode}`} onClick={props.onCycleSearchMode} title={`Web search: ${props.searchMode}. Click for ${nextSearchMode}.`} aria-label={`Web search ${props.searchMode}. Switch to ${nextSearchMode}.`}><Globe2 size={16} /><span>Web</span><strong>{props.searchMode}</strong></button></div>
+        <div className="composer-toolbar"><div className="composer-tools"><input ref={fileInput} type="file" hidden multiple accept=".txt,.md,.js,.jsx,.ts,.tsx,.json,.html,.css,.scss,.py,.sh,.svg,.xml,.yaml,.yml,.sql,.java,.go,.rs" onChange={(event) => void attachFiles(event.target.files)} /><button className="composer-attach" onClick={() => fileInput.current?.click()} title="Attach a code or text file" aria-label="Attach a file"><Paperclip size={18} strokeWidth={1.7} /></button><span className="toolbar-divider" /><button className="model-trigger" onClick={() => { if (!pickerOpen) props.onLoadModels(); setPickerOpen((open) => !open); }} aria-expanded={pickerOpen} aria-label={`Select model: ${props.selectedModel.name}`}><ProviderIcon provider={props.selectedModel.provider} size="small" /><span className="model-trigger-name">{props.selectedModel.shortName}</span><span className={`model-trigger-status ${props.isConnected(props.selectedModel.provider) ? 'ready' : ''}`} /><ChevronDown size={15} /></button><span className="toolbar-divider" /><button type="button" className={`composer-search composer-search-${props.searchMode}`} onClick={props.onCycleSearchMode} title={`Web search: ${props.searchMode}. Click for ${nextSearchMode}.`} aria-label={`Web search ${props.searchMode}. Switch to ${nextSearchMode}.`}><Globe2 size={16} /><span>Web</span><strong>{props.searchMode}</strong></button><span className="toolbar-divider" /><button type="button" className={`composer-effort composer-effort-${effort}`} onClick={props.onCycleEffort} title={`Effort: ${effortMeta.label}. Click to cycle.`} aria-label={`Effort ${effortMeta.label}. Click to cycle.`}>{effortMeta.icon}<span>{effortMeta.label}</span></button></div>
           {props.sending ? <button className="send-button stop-button" onClick={props.onStop} title="Stop generation" aria-label="Stop generation"><Square size={15} fill="currentColor" /></button> : <button className="send-button" onClick={send} disabled={!draft.trim()} title="Send message" aria-label="Send message"><Send size={17} strokeWidth={2} /></button>}
         </div>
       </div>
-      <div className="composer-hint"><span><span className="hint-star">✳</span> {props.searchMode === 'off' ? 'Built to help you build better.' : props.searchMode === 'auto' ? 'Web search when the AI needs it.' : 'Web search on every message.'}</span><span>Enter to send <span className="hint-divider">·</span> Shift + Enter for a new line</span></div>
+      <div className="composer-hint"><span><span className="hint-star">✳</span> {effortMeta.hint} {props.searchMode === 'auto' ? 'Web search on when helpful.' : props.searchMode === 'always' ? 'Web search on every message.' : ''}</span><span>Enter to send <span className="hint-divider">·</span> Shift + Enter for a new line</span></div>
     </div></div>
   </div>;
 }

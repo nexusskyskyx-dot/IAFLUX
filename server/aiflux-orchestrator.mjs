@@ -23,17 +23,30 @@ import { searchWeb } from './search.mjs';
 import { buildAssistantPrompt } from './assistant-profile.mjs';
 import { memberInfo, resolveAIFluxRoutes, KEYLESS_PROVIDERS } from './aiflux-family.mjs';
 
-// Max per-sub-agent wall time. Kept SHORT so orchestration stays snappy even
-// if a model is slow to start streaming (the multi-route failover will jump
-// to the next model on this timeout). Keyed models (Gemini/Groq) are
-// consistently fast so they get the shorter budget; keyless public endpoints
-// are slower/unpredictable so they get a slightly longer leash but still
-// fail over quickly.
-const PHASE_TIMEOUT_MS = 12_000;
-const KEYLESS_PHASE_TIMEOUT_MS = 8_000;
+// Per-sub-agent wall time budgets, tuned by effort. Fast mode tightens them
+// aggressively; Power mode gives deep reasoning models (DeepSeek R1, Nemotron
+// Ultra) more breathing room. Multi-route failover jumps to the next model
+// as soon as this fires.
+function phaseBudget(effort, keyless) {
+  if (effort === 'fast') return keyless ? 5_000 : 7_000;
+  if (effort === 'power') return keyless ? 12_000 : 20_000;
+  return keyless ? 8_000 : 12_000;
+}
 
-// Upper bound on sub-agent reply length. Internal handoffs should be tight.
-const PHASE_MAX_CHARS = 4_000;
+// Upper bound on sub-agent reply length. Internal handoffs should be tight
+// in fast mode; power mode lets plans/reviews be more thorough.
+function phaseCharLimit(effort) {
+  if (effort === 'fast') return 2_000;
+  if (effort === 'power') return 8_000;
+  return 4_000;
+}
+
+// How many parallel web-search queries Toki fires in research phase.
+function researchBudget(effort) {
+  if (effort === 'fast') return 1;
+  if (effort === 'power') return 3;
+  return 2;
+}
 
 // Phases the orchestrator can run, in order. The set of phases actually used
 // depends on classifyRequest() — trivial/greeting/code-review-only requests
@@ -71,7 +84,7 @@ export function classifyRequest(question) {
 /**
  * Consume an SSE stream fully and return the concatenated text, or throw.
  */
-async function drainSSE(stream, format, timeoutMs, signal) {
+async function drainSSE(stream, format, timeoutMs, signal, charLimit) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new Error('phase-timeout')), timeoutMs);
   const onAbort = () => controller.abort();
@@ -86,7 +99,7 @@ async function drainSSE(stream, format, timeoutMs, signal) {
       if (part.model && !model) model = part.model;
       if (part.text) text += part.text;
       if (part.done) break;
-      if (text.length > PHASE_MAX_CHARS) break;
+      if (text.length > charLimit) break;
     }
   } finally {
     clearTimeout(timer);
@@ -101,13 +114,14 @@ async function drainSSE(stream, format, timeoutMs, signal) {
  * the produced text or null if every route failed (the caller treats null as
  * "skip this phase — not fatal").
  */
-async function callMember(memberId, messages, { userKeys, envKeys, ollamaConfigured, signal }) {
+async function callMember(memberId, messages, { userKeys, envKeys, ollamaConfigured, signal, effort = 'auto' }) {
   const routes = resolveAIFluxRoutes(memberId, userKeys, envKeys, ollamaConfigured);
   const info = memberInfo(memberId);
-  let lastError = null;
+  const charLimit = phaseCharLimit(effort);
   for (const route of routes) {
     if (signal?.aborted) return null;
-    const timeoutMs = KEYLESS_PROVIDERS.has(route.provider) ? KEYLESS_PHASE_TIMEOUT_MS : PHASE_TIMEOUT_MS;
+    const keyless = KEYLESS_PROVIDERS.has(route.provider);
+    const timeoutMs = phaseBudget(effort, keyless);
     const ctrl = new AbortController();
     const onAbort = () => ctrl.abort();
     if (signal) signal.addEventListener('abort', onAbort);
@@ -125,11 +139,10 @@ async function callMember(memberId, messages, { userKeys, envKeys, ollamaConfigu
         throw new RequestError(upstream.status >= 500 ? 502 : upstream.status, friendlyUpstreamError(upstream.status, raw, route.key));
       }
       if (!upstream.body) throw new RequestError(502, 'empty');
-      const { text } = await drainSSE(upstream.body, req.format, timeoutMs, ctrl.signal);
+      const { text } = await drainSSE(upstream.body, req.format, timeoutMs, ctrl.signal, charLimit);
       if (!text || text.length < 2) throw new RequestError(502, 'empty');
-      return { member: memberId, provider: route.provider, model: route.model, text: text.slice(0, PHASE_MAX_CHARS) };
+      return { member: memberId, provider: route.provider, model: route.model, text: text.slice(0, charLimit) };
     } catch (err) {
-      lastError = err;
       continue;
     } finally {
       clearTimeout(timer);
@@ -137,8 +150,6 @@ async function callMember(memberId, messages, { userKeys, envKeys, ollamaConfigu
       try { ctrl.abort(); } catch { /* noop */ }
     }
   }
-  // All routes failed — non-fatal. Orchestration can still produce a final
-  // answer from whatever partial context it has.
   return null;
 }
 
@@ -154,38 +165,66 @@ async function callMember(memberId, messages, { userKeys, envKeys, ollamaConfigu
  * @param {AbortSignal} signal
  * @param {{searchKey: string, envSearchKey: string}} searchCfg
  */
-export async function runOrchestrator({ question, userKeys, envKeys, ollamaConfigured, sendEvent, signal, searchCfg }) {
+export async function runOrchestrator({ question, userKeys, envKeys, ollamaConfigured, sendEvent, signal, searchCfg, effort = 'auto' }) {
   const phases = classifyRequest(question);
-  const result = { plan: null, research: null, code: null, review: null };
+  // In fast mode, skip planning + research for anything that isn't a search-
+  // flagged build request — direct-to-answer is fastest.
+  const doPlan   = phases.plan   && effort !== 'fast';
+  const doSearch = phases.search && effort !== 'fast';
+  const doCode   = phases.code;
+  const doReview = phases.review && effort !== 'fast';
+  const result = { plan: null, research: null, code: null, review: null, finalMember: 'flux' };
 
-  // PHASE 1 + 2 run in parallel: Ziker plans while Toki researches. These are
-  // independent (Toki's search query is derived directly from the user's
-  // request, not from Ziker's plan) so running them together cuts orchestration
-  // latency in half.
+  // PHASE 1 + 2 run in parallel: Ziker plans while Toki researches.
   const parallelTasks = [];
 
-  if (phases.plan && !signal?.aborted) {
+  if (doPlan && !signal?.aborted) {
     sendEvent({ type: 'phase', phase: 'planning', label: PHASES.plan.label, description: PHASES.plan.description });
     parallelTasks.push(
       callMember('ziker', [{
         role: 'user',
-        content: `Break this request into 3-6 ordered build steps. One sentence per step, focused on files to create/change. No code.\n\nRequest:\n${question}`,
-      }], { userKeys, envKeys, ollamaConfigured, signal }).then((r) => { result.plan = r; })
+        content: `Break this request into ${effort === 'power' ? '4-8' : '3-6'} ordered steps. One sentence per step, focused on files to create/change. No code.\n\nRequest:\n${question}`,
+      }], { userKeys, envKeys, ollamaConfigured, signal, effort }).then((r) => { result.plan = r; })
     );
   }
 
-  if (phases.search && !signal?.aborted) {
+  if (doSearch && !signal?.aborted) {
     sendEvent({ type: 'phase', phase: 'research', label: PHASES.search.label, description: PHASES.search.description });
     parallelTasks.push((async () => {
-      const q = await callMember('toki', [{
-        role: 'user',
-        content: `Produce ONE short web-search query (max 12 words) for this request. Reply with only the query.\n\nRequest:\n${question}`,
-      }], { userKeys, envKeys, ollamaConfigured, signal });
-      const query = (q?.text || question).replace(/^["']|["']$/g, '').trim().slice(0, 180);
-      try {
-        const sources = await searchWeb(query, searchCfg.searchKey || searchCfg.envSearchKey, { signal });
-        if (sources?.length) result.research = { query, sources, member: 'toki' };
-      } catch { /* search failure non-fatal */ }
+      // Ask Toki for N diverse queries (broad, specific, version-sensitive),
+      // then search them all in parallel and merge+dedupe sources.
+      const n = researchBudget(effort);
+      const qPrompt = n === 1
+        ? `Produce ONE short web-search query (max 12 words) for this request. Reply with only the query.`
+        : `Produce ${n} DIFFERENT short web-search queries (max 12 words each) for this request, one per line. Cover: (1) broad topic, (2) specific docs/version,${n >= 3 ? ' (3) examples/tutorials,' : ''} each query on its own line. No numbering, no bullets.`;
+      const qRes = await callMember('toki', [
+        { role: 'user', content: `${qPrompt}\n\nRequest:\n${question}` },
+      ], { userKeys, envKeys, ollamaConfigured, signal, effort });
+      const raw = (qRes?.text || question).trim();
+      const queries = (n === 1 ? [raw] : raw.split('\n').map((l) => l.replace(/^[-*\d.\s]+/, '').trim()).filter(Boolean))
+        .map((q) => q.replace(/^["']|["']$/g, '').trim().slice(0, 180))
+        .filter((q, i, arr) => q.length > 3 && arr.indexOf(q) === i)
+        .slice(0, n);
+      if (queries.length === 0) queries.push(question.slice(0, 180));
+      const searchKey = searchCfg.searchKey || searchCfg.envSearchKey;
+      const allSources = [];
+      const seen = new Set();
+      // Run queries in parallel, cap each at 4 results to keep total bounded.
+      const results = await Promise.all(queries.map((q) =>
+        searchWeb(q, searchKey, { signal }).then((srcs) => ({ q, srcs })).catch(() => ({ q, srcs: [] }))
+      ));
+      for (const { q, srcs } of results) {
+        for (const s of (srcs || []).slice(0, 4)) {
+          if (!s?.url || seen.has(s.url)) continue;
+          seen.add(s.url);
+          allSources.push({ ...s, _query: q });
+          if (allSources.length >= (effort === 'power' ? 8 : 5)) break;
+        }
+        if (allSources.length >= (effort === 'power' ? 8 : 5)) break;
+      }
+      if (allSources.length) {
+        result.research = { query: queries[0], queries, sources: allSources, member: 'toki' };
+      }
     })());
   }
 
@@ -193,7 +232,7 @@ export async function runOrchestrator({ question, userKeys, envKeys, ollamaConfi
   if (signal?.aborted) return result;
 
   // PHASE 3 — Hiku codes, using plan + research if available.
-  if (phases.code && !signal?.aborted) {
+  if (doCode && !signal?.aborted) {
     sendEvent({ type: 'phase', phase: 'coding', label: PHASES.code.label, description: PHASES.code.description });
     const hikuPrompt = [
       `Request:\n${question}`,
@@ -201,28 +240,75 @@ export async function runOrchestrator({ question, userKeys, envKeys, ollamaConfi
       result.research?.sources?.length
         ? `\nSources:\n${result.research.sources.map((s, i) => `[${i + 1}] ${s.title} — ${s.url}\n${s.snippet}`).join('\n\n')}`
         : '',
-      `\nWrite the implementation. Use <af-tool name="..."> Canvas tools to create/edit files directly. Produce complete, runnable code.`,
+      effort === 'power'
+        ? `\nWrite a complete, production-quality implementation using <af-tool name="..."> Canvas tools to create/edit files directly. Cover error states, edge cases, and responsive styling for HTML/CSS. All files must be created as separate <af-tool> calls.`
+        : `\nWrite the implementation. Use <af-tool name="..."> Canvas tools to create/edit files directly. Produce complete, runnable code.`,
     ].join('\n');
-    const codeResult = await callMember('hiku', [{ role: 'user', content: hikuPrompt }], { userKeys, envKeys, ollamaConfigured, signal });
+    const codeResult = await callMember('hiku', [{ role: 'user', content: hikuPrompt }], { userKeys, envKeys, ollamaConfigured, signal, effort });
     if (codeResult) result.code = codeResult;
   }
 
-  // PHASE 4 — Siku reviews Hiku's draft.
-  if (phases.review && result.code && !signal?.aborted) {
-    sendEvent({ type: 'phase', phase: 'reviewing', label: PHASES.review.label, description: PHASES.review.description });
-    const reviewResult = await callMember('siku', [{
-      role: 'user',
-      content: [
+  // PHASE 4 — Siku reviews Hiku's draft (fast mode skips this; power mode is
+  // more thorough, asks for security+performance review, and runs an extra
+  // Hiku ↔ Siku repair iteration if issues are found (build-until-done).
+  if (doReview && result.code && !signal?.aborted) {
+    const repairRounds = effort === 'power' ? 2 : 1;
+    let currentCode = result.code.text;
+    let lastReview = null;
+    for (let round = 0; round < repairRounds; round++) {
+      if (signal?.aborted) break;
+      sendEvent({
+        type: 'phase',
+        phase: 'reviewing',
+        label: PHASES.review.label,
+        description: round === 0 ? PHASES.review.description : `Reviewing revision ${round}…`,
+      });
+      const reviewPrompt = effort === 'power'
+        ? `Review for bugs, security issues, missing error handling, accessibility, responsive layout, and performance. If correct reply exactly "OK". Otherwise produce corrected <af-tool> calls plus a brief fix summary noting each issue category.`
+        : `Review for bugs, security issues, missing error handling. If correct reply exactly "OK". Otherwise produce corrected <af-tool> calls plus a short fix summary.`;
+      const reviewInput = [
         `Request:\n${question}`,
         result.plan ? `\nPlan:\n${result.plan.text}` : '',
-        `\nDraft:\n${result.code.text}`,
-        `\nReview for bugs, security issues, missing error handling. If correct reply exactly "OK". Otherwise produce corrected <af-tool> calls plus a short fix summary.`,
-      ].join('\n'),
-    }], { userKeys, envKeys, ollamaConfigured, signal });
-    if (reviewResult && !/^ok[.!]?$/i.test(reviewResult.text.trim())) {
-      result.review = reviewResult;
+        `\nCurrent code (${round === 0 ? 'initial draft' : `revision ${round}`}):\n${currentCode}`,
+        ...(lastReview ? [`\nPrevious review issues (must all be fixed):\n${lastReview}`] : []),
+        `\n${reviewPrompt}`,
+      ].join('\n');
+      const reviewResult = await callMember('siku', [{ role: 'user', content: reviewInput }], { userKeys, envKeys, ollamaConfigured, signal, effort });
+      if (!reviewResult) break;
+      const reviewText = reviewResult.text.trim();
+      if (/^ok[.!]?$/i.test(reviewText)) { lastReview = null; break; }
+      lastReview = reviewText;
+      // Power mode: let Hiku revise based on the review.
+      if (round < repairRounds - 1 && effort === 'power') {
+        sendEvent({ type: 'phase', phase: 'coding', label: 'Revising', description: `Hiku addresses review feedback (revision ${round + 1})…` });
+        const revisePrompt = [
+          `Request:\n${question}`,
+          result.plan ? `\nPlan:\n${result.plan.text}` : '',
+          `\nCurrent code:\n${currentCode}`,
+          `\nSiku's review (fix every issue):\n${reviewText}`,
+          `\nProduce the corrected implementation with complete <af-tool> calls. Do NOT apologize; just output the fixed code.`,
+        ].join('\n');
+        const revised = await callMember('hiku', [{ role: 'user', content: revisePrompt }], { userKeys, envKeys, ollamaConfigured, signal, effort });
+        if (revised && revised.text.trim().length > 50) currentCode = revised.text;
+        else break;
+      }
     }
+    if (lastReview) {
+      result.review = { member: 'siku', text: lastReview, provider: 'aiflux', model: 'siku' };
+    }
+    // Keep the final (possibly revised) code as Hiku's answer.
+    result.code = { ...result.code, text: currentCode };
   }
+
+  // Decide which family member should stream the final answer to the user.
+  // * Coding tasks (code or review produced) → Hiku (coder voice).
+  // * Pure reasoning questions (no code, plan only) → Siku.
+  // * Research-only (no code) → Toki.
+  // * Otherwise → Flux (general manager voice).
+  if (result.code || result.review) result.finalMember = 'hiku';
+  else if (result.plan && !result.research) result.finalMember = 'siku';
+  else if (result.research && !result.code) result.finalMember = 'toki';
+  else result.finalMember = 'flux';
 
   return result;
 }

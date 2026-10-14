@@ -39,6 +39,13 @@ export interface ToolResultMessage {
 }
 
 export const MAX_TOOL_ROUNDS = 8;
+export const FAST_TOOL_ROUNDS = 2;
+export const POWER_TOOL_ROUNDS = 15;
+export function toolRoundsFor(effort: 'fast' | 'auto' | 'power' | undefined): number {
+  if (effort === 'fast') return FAST_TOOL_ROUNDS;
+  if (effort === 'power') return POWER_TOOL_ROUNDS;
+  return MAX_TOOL_ROUNDS;
+}
 const MAX_FILE_READ = 40_000;
 const MAX_PREVIEW_CHARS = 12_000;
 const TOTAL_FILES_LIMIT = 40;

@@ -1,4 +1,4 @@
-import type { Conversation, Credentials, ModelInfo, SearchMode } from '../types';
+import type { Conversation, Credentials, EffortMode, ModelInfo, SearchMode } from '../types';
 import { CURATED_MODELS, DEFAULT_MODEL } from './models';
 import { isNonChatModelId, isSelectableOpenRouterId } from './model-policy.mjs';
 
@@ -7,6 +7,7 @@ const ACTIVE_KEY = 'aiflux.active.v1';
 const MODEL_KEY = 'aiflux.model.v1';
 const CREDS_KEY = 'aiflux.credentials.v1';
 const SEARCH_MODE_KEY = 'aiflux.search-mode.v1';
+const EFFORT_KEY = 'aiflux.effort.v1';
 
 export function loadConversations(): Conversation[] {
   try {
@@ -72,6 +73,17 @@ export function loadSearchMode(): SearchMode {
 
 export function saveSearchMode(mode: SearchMode) {
   try { localStorage.setItem(SEARCH_MODE_KEY, mode); } catch { /* In-memory preference still works. */ }
+}
+
+export function loadEffortMode(): EffortMode {
+  try {
+    const value = localStorage.getItem(EFFORT_KEY);
+    return value === 'fast' || value === 'power' ? value : 'auto';
+  } catch { return 'auto'; }
+}
+
+export function saveEffortMode(mode: EffortMode) {
+  try { localStorage.setItem(EFFORT_KEY, mode); } catch { /* noop */ }
 }
 
 export function loadCredentials(): Credentials {

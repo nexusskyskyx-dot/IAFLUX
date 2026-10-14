@@ -15,6 +15,7 @@ export async function requestChat(input: {
   keys: Record<'openrouter' | 'gemini' | 'groq', string>;
   searchKey: string;
   searchMode: SearchMode;
+  effort: 'fast' | 'auto' | 'power';
   accessCode: string;
   signal: AbortSignal;
   onEvent: (event: StreamEvent) => void;
@@ -27,7 +28,7 @@ export async function requestChat(input: {
       ...(input.searchMode !== 'off' && input.searchKey ? { 'x-aiflux-search-key': input.searchKey } : {}),
       ...(input.accessCode ? { 'x-aiflux-access-code': input.accessCode } : {}),
     },
-    body: JSON.stringify({ provider: input.provider, model: input.model, messages: input.messages, searchMode: input.searchMode }),
+    body: JSON.stringify({ provider: input.provider, model: input.model, messages: input.messages, searchMode: input.searchMode, effort: input.effort }),
     signal: input.signal,
   });
   if (!response.ok) {

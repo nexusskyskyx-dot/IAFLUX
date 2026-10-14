@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDownToLine, Check, ChevronRight, Code2, KeyRound, Menu, PanelRightOpen } from 'lucide-react';
-import type { AppConfig, AttachedFile, ChatMessage, Conversation, Credentials, ModelInfo, Provider, SearchMode, WorkspaceFile } from './types';
+import type { AppConfig, AttachedFile, ChatMessage, Conversation, Credentials, EffortMode, ModelInfo, Provider, SearchMode, WorkspaceFile } from './types';
 import { CURATED_MODELS, DEFAULT_MODEL } from './lib/models';
 import { createDraft, downloadConversation, extractCodeFiles, mergeGeneratedFiles } from './lib/files';
-import { hasSavedModel, loadActiveId, loadConversations, loadCredentials, loadModel, loadSearchMode, saveActiveId, saveConversations, saveCredentials, saveModel, saveSearchMode } from './lib/storage';
+import { hasSavedModel, loadActiveId, loadConversations, loadCredentials, loadEffortMode, loadModel, loadSearchMode, saveActiveId, saveConversations, saveCredentials, saveEffortMode, saveModel, saveSearchMode } from './lib/storage';
 import { isUsableFreeCatalogModel } from './lib/model-policy.mjs';
 import { requestChat } from './lib/chat';
-import { buildProviderMessages, executeToolCall, extractToolCalls, formatToolResultMessage, injectWorkspaceSnapshot, MAX_TOOL_ROUNDS, stripToolCalls, type ToolResultMessage } from './lib/tool-use';
+import { buildProviderMessages, executeToolCall, extractToolCalls, formatToolResultMessage, injectWorkspaceSnapshot, stripToolCalls, toolRoundsFor, type ToolResultMessage } from './lib/tool-use';
 import { Brand } from './components/Brand';
 import Sidebar from './components/Sidebar';
 import ChatPanel from './components/ChatPanel';
@@ -26,6 +26,7 @@ export default function App() {
   const [manualSelection, setManualSelection] = useState(hasSavedModel);
   const [credentials, setCredentials] = useState<Credentials>(loadCredentials);
   const [searchMode, setSearchMode] = useState<SearchMode>(loadSearchMode);
+  const [effort, setEffort] = useState<EffortMode>(loadEffortMode);
   const [config, setConfig] = useState<AppConfig>(emptyConfig);
   const [liveModels, setLiveModels] = useState<ModelInfo[]>([]);
   const [ollamaModels, setOllamaModels] = useState<ModelInfo[]>([]);
@@ -156,6 +157,12 @@ export default function App() {
     saveSearchMode(next);
     notify(next === 'auto' ? 'Web search: the AI chooses when to look things up.' : next === 'always' ? 'Web search: search before every answer.' : 'Web search turned off.');
   };
+  const cycleEffort = () => {
+    const next: EffortMode = effort === 'fast' ? 'auto' : effort === 'auto' ? 'power' : 'fast';
+    setEffort(next);
+    saveEffortMode(next);
+    notify(next === 'fast' ? 'Fast mode: quick, direct answers.' : next === 'power' ? 'Power mode: deep reasoning, multi-query research, thorough review.' : 'Smart mode: AIFLUX adapts effort to the task.');
+  };
   const changeView = (next: 'studio' | 'library') => {
     setView(next);
     setMobileSidebarOpen(false);
@@ -239,7 +246,8 @@ export default function App() {
           searchKey: credentials.searchKey,
           // Only run web search on the FIRST assistant turn of a user message;
           // subsequent tool-loop turns should not re-trigger web searches.
-          searchMode: params.roundsLeft === MAX_TOOL_ROUNDS ? effectiveSearchMode : 'off',
+          searchMode: params.roundsLeft === toolRoundsFor(effort) ? effectiveSearchMode : 'off',
+          effort,
           accessCode: credentials.accessCode,
           signal: controller.signal,
           onEvent: (event) => {
@@ -372,7 +380,7 @@ export default function App() {
       messages: firstPassHistory,
       files: initialFiles,
       selectedFileId: activeChat.selectedFileId,
-      roundsLeft: MAX_TOOL_ROUNDS,
+      roundsLeft: toolRoundsFor(effort),
     }).catch((error: unknown) => {
       const message = error instanceof Error ? error.message : 'Something went wrong running tools.';
       patchMessage(chatId, assistantId, (previous) => ({ ...previous, status: 'error', content: previous.content || `**Could not finish.** ${message}` }));
@@ -431,7 +439,8 @@ export default function App() {
       <header className="topbar"><div className="topbar-left"><button className="icon-button mobile-menu-button" onClick={() => setMobileSidebarOpen(true)} aria-label="Open menu"><Menu size={21} /></button><span className="mobile-brand"><Brand /></span><div className="topbar-breadcrumb"><span>Workspace</span><ChevronRight size={15} /><strong>{view === 'library' ? 'Model library' : activeChat.messages.length ? activeChat.title : 'New conversation'}</strong></div></div><div className="topbar-actions"><button className={`topbar-connection ${anyConnected ? 'connected' : ''}`} onClick={() => openSettings()} title={anyConnected ? 'Manage AI connections' : 'Connect an AI model'} aria-label={anyConnected ? 'Manage AI connections' : 'Connect an AI model'}><span className="topbar-connection-dot" /> <span>{anyConnected ? 'Models connected' : 'Connect a model'}</span><KeyRound size={14} /></button>{view === 'studio' && activeChat.messages.length > 0 && <button className="topbar-action-button export-button" onClick={() => downloadConversation(activeChat)} title="Export conversation as Markdown"><ArrowDownToLine size={17} /><span>Export</span></button>}<span className="topbar-divider" /><button className={`topbar-canvas-button ${canvasVisible ? 'is-open' : ''}`} onClick={toggleCanvas}><Code2 size={17} /><span>Canvas</span>{!canvasVisible ? <PanelRightOpen size={15} /> : <span className="canvas-button-spark">✳</span>}</button><button className="topbar-avatar" onClick={() => openSettings()} aria-label="Open settings">AF</button></div></header>
       {view === 'studio' ? <ChatPanel conversation={activeChat} selectedModel={selectedModel || DEFAULT_MODEL} models={models}
         catalogAvailable={catalogAvailable} connected={anyConnected} sending={sending} contextFile={contextFile}
-        searchMode={searchMode} onCycleSearchMode={cycleSearchMode} isConnected={isConnected} onSend={sendMessage}
+        searchMode={searchMode} effort={effort} onCycleSearchMode={cycleSearchMode} onCycleEffort={cycleEffort}
+        isConnected={isConnected} onSend={sendMessage}
         onStop={stop} onSelectModel={chooseModel} onLoadModels={() => void loadModels()}
         onLibrary={() => changeView('library')} onOpenSnippet={openSnippet} onClearContext={() => setContextFile(null)}
         onNotify={notify} onSettings={() => openSettings()} />

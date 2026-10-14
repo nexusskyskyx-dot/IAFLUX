@@ -160,16 +160,19 @@ app.post('/api/chat', rateLimit, async (req, res) => {
     let memberAddendum = '';
     const bodyProvider = req.body?.provider;
     const bodyModel = req.body?.model;
+    // Pre-read effort for routing decisions before validateChat resolves AIFLUX.
+    const bodyEffort = req.body?.effort;
+    const effort = (bodyEffort === 'fast' || bodyEffort === 'power') ? bodyEffort : 'auto';
+
+    // Validate using the first route, then swap routes in on retry.
+    const input = validateChat(req.body, Boolean(ollamaBaseUrl), (memberId) => {
+      const routes = resolveAIFluxRoutes(memberId, userKeys, envKeys, Boolean(ollamaBaseUrl));
+      return routes[0];
+    });
     if (bodyProvider === 'aiflux') {
       aifluxRoutes = resolveAIFluxRoutes(bodyModel, userKeys, envKeys, Boolean(ollamaBaseUrl));
       memberAddendum = aifluxRoutes[0].memberAddendum;
     }
-
-    // Validate using the first route, then swap routes in on retry.
-    const input = validateChat(req.body, Boolean(ollamaBaseUrl), (memberId) => {
-      const routes = aifluxRoutes || resolveAIFluxRoutes(memberId, userKeys, envKeys, Boolean(ollamaBaseUrl));
-      return routes[0];
-    });
 
     timeout = setTimeout(() => controller.abort(new Error('timeout')), 120_000);
 
@@ -187,18 +190,33 @@ app.post('/api/chat', rateLimit, async (req, res) => {
     let orchestratorCtx = null;
     let searchResult = null;
     const isFlux = input.aifluxRoute && bodyModel === 'flux';
-    if (isFlux && !controller.signal.aborted) {
+    // Run orchestrator in auto mode for any non-trivial request; in power mode
+    // always run it; in fast mode skip it entirely (direct answer).
+    const shouldOrchestrate = isFlux && effort !== 'fast' && !controller.signal.aborted && (
+      effort === 'power' ||
+      cleanQuestion.length > 50 || /build|create|make|implement|write|code|fix|debug|refactor|setup|design/i.test(cleanQuestion)
+    );
+    if (shouldOrchestrate) {
       startStream(res, input.model);
-      sendEvent(res, { type: 'orchestrator', phase: 'start', label: 'Flux is orchestrating', description: 'Coordinating the AIFLUX team' });
+      sendEvent(res, { type: 'orchestrator', phase: 'start', label: `Flux ${effort === 'power' ? 'Power' : 'Smart'} mode`, description: effort === 'power' ? 'Coordinating full AIFLUX team (deep)' : 'Coordinating the AIFLUX team' });
       orchestratorCtx = await runOrchestrator({
         question: cleanQuestion,
         userKeys, envKeys, ollamaConfigured: Boolean(ollamaBaseUrl),
         sendEvent: (ev) => sendEvent(res, ev),
         signal: controller.signal,
         searchCfg: { searchKey: suppliedSearchKey, envSearchKey },
+        effort,
       });
       if (orchestratorCtx?.research?.sources?.length) {
         searchResult = { query: orchestratorCtx.research.query, sources: orchestratorCtx.research.sources };
+      }
+      // Re-resolve final-answer routes using the specialist the orchestrator
+      // picked (hiku for code, siku for reasoning, toki for research, flux
+      // for general chat). This way the answer streams through the strongest
+      // member for the task, not always Flux's default coding priority.
+      if (orchestratorCtx?.finalMember && orchestratorCtx.finalMember !== 'flux') {
+        aifluxRoutes = resolveAIFluxRoutes(orchestratorCtx.finalMember, userKeys, envKeys, Boolean(ollamaBaseUrl));
+        memberAddendum = aifluxRoutes[0].memberAddendum;
       }
     } else if (input.searchMode !== 'off' && !shouldBypassSearch(input)) {
       // Standard (non-Flux or trivial-Flux) search path.
@@ -278,10 +296,15 @@ app.post('/api/chat', rateLimit, async (req, res) => {
         lastError = err;
         continue;
       }
-      // Tighter timeouts so users never wait on a stalled free endpoint.
-      // Keyed Groq/Gemini respond in seconds; if one stalls >30s we fail over.
-      // Keyless public endpoints get a short 15s leash.
-      const routeTimeoutMs = route.keyless ? 15_000 : 30_000;
+      // Per-route timeouts tuned by effort:
+      //   fast  -> 12s keyed / 8s keyless   (quick answers, fast failover)
+      //   auto  -> 25s keyed / 12s keyless  (balanced)
+      //   power -> 60s keyed / 18s keyless  (deep reasoning, large outputs)
+      const routeTimeoutMs = effort === 'fast'
+        ? (route.keyless ? 8_000 : 12_000)
+        : effort === 'power'
+          ? (route.keyless ? 18_000 : 60_000)
+          : (route.keyless ? 12_000 : 25_000);
       const routeController = new AbortController();
       const onAbort = () => routeController.abort();
       controller.signal.addEventListener('abort', onAbort);
