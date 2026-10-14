@@ -8,6 +8,7 @@ export const SYSTEM_PROMPT = buildAssistantPrompt();
 
 export const PROVIDER_URLS = Object.freeze({
   openrouter: 'https://openrouter.ai/api/v1/chat/completions',
+  xkiro: 'https://api.xkiro.com/v1/chat/completions',
   groq: 'https://api.groq.com/openai/v1/chat/completions',
   gemini: 'https://generativelanguage.googleapis.com/v1beta/models/',
 });
@@ -19,7 +20,7 @@ export class RequestError extends Error {
   }
 }
 
-export function validateChat(body, ollamaConfigured = false) {
+export function validateChat(body, ollamaConfigured = false, xkiroFreeModelIds = new Set()) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     throw new RequestError(400, 'Invalid request.');
   }
@@ -27,7 +28,7 @@ export function validateChat(body, ollamaConfigured = false) {
   if (!['off', 'auto', 'always'].includes(searchMode)) {
     throw new RequestError(400, 'Choose a valid web search mode.');
   }
-  if (!['openrouter', 'gemini', 'groq', 'ollama'].includes(provider)) {
+  if (!['openrouter', 'xkiro', 'gemini', 'groq', 'ollama'].includes(provider)) {
     throw new RequestError(400, 'Choose a supported provider.');
   }
   if (typeof model !== 'string' || model.length > 180) {
@@ -41,6 +42,9 @@ export function validateChat(body, ollamaConfigured = false) {
   }
   if (provider === 'openrouter' && !isSelectableOpenRouterId(model)) {
     throw new RequestError(400, 'Only specific OpenRouter :free chat models are available in AIFLUX.');
+  }
+  if (provider === 'xkiro' && !(xkiroFreeModelIds instanceof Set && xkiroFreeModelIds.has(model))) {
+    throw new RequestError(400, 'Choose a model currently listed as free in xKiro’s live chat catalog.');
   }
   if (['gemini', 'groq'].includes(provider) && !catalog.some((entry) => entry.provider === provider && entry.id === model)) {
     throw new RequestError(400, 'This model is not in the supported free-tier catalog.');
@@ -122,7 +126,7 @@ export function buildRequest({ provider, model, messages, searchMode = 'off', se
 }
 
 function providerName(provider) {
-  return ({ openrouter: 'OpenRouter', gemini: 'Gemini', groq: 'Groq' })[provider] ?? provider;
+  return ({ openrouter: 'OpenRouter', xkiro: 'xKiro', gemini: 'Gemini', groq: 'Groq' })[provider] ?? provider;
 }
 
 export function friendlyUpstreamError(status, raw, key = '') {
@@ -211,6 +215,56 @@ export function extractChunk(format, data) {
     text: typeof content === 'string' ? content : Array.isArray(content) ? content.filter((part) => part.type === 'text').map((part) => part.text || '').join('') : '',
     model: parsed.model,
   };
+}
+
+const XKIRO_MODEL_ID = /^[a-zA-Z0-9._:/-]{1,180}$/;
+
+function hasZeroPrice(value) {
+  if (typeof value !== 'number' && typeof value !== 'string') return false;
+  const amount = Number(value);
+  return Number.isFinite(amount) && amount === 0;
+}
+
+/** xKiro's public catalog is the source of truth: free chat tier and zero token prices. */
+export function isUsableFreeXkiroModel(model) {
+  if (!model || typeof model !== 'object') return false;
+  if (typeof model.id !== 'string' || !XKIRO_MODEL_ID.test(model.id) || isNonChatModelId(model.id)) return false;
+  const displayName = typeof model.display_name === 'string' ? model.display_name : '';
+  if (displayName && isNonChatModelId(displayName)) return false;
+  const pricing = model.pricing || {};
+  const cachePricesAreFree = ['cache_read', 'cache_write'].every((field) => pricing[field] == null || hasZeroPrice(pricing[field]));
+  return model.modality === 'chat' && model.access_tier === 'free' &&
+    hasZeroPrice(pricing.input) && hasZeroPrice(pricing.output) && cachePricesAreFree;
+}
+
+export async function getFreeXkiroModels(fetchImpl = fetch) {
+  const response = await fetchImpl('https://api.xkiro.com/v1/models', { signal: AbortSignal.timeout(7000) });
+  if (!response.ok) throw new Error('xKiro model catalog unavailable');
+  const json = await response.json();
+  if (!Array.isArray(json.data)) throw new Error('Invalid xKiro model catalog');
+  return json.data
+    .filter(isUsableFreeXkiroModel)
+    .map((model) => {
+      const name = String(model.display_name || model.id).slice(0, 80);
+      const capabilities = model.capabilities && typeof model.capabilities === 'object' ? model.capabilities : {};
+      const coding = /coder|coding|\bcode\b|devstral|codestral|software.engineer|\bswe\b/i.test(`${model.id} ${name}`);
+      const details = [
+        'Daily free-token allowance applies.',
+        capabilities.vision ? 'Vision' : '',
+        capabilities.tools ? 'Tool calling' : '',
+      ].filter(Boolean).join(' · ');
+      return {
+        id: model.id,
+        provider: 'xkiro',
+        name,
+        shortName: name.slice(0, 36),
+        description: `Free xKiro chat model. ${details}`,
+        strength: coding ? 'Coding focused' : capabilities.reasoning ? 'Reasoning capable' : capabilities.vision ? 'Vision capable' : 'General chat',
+        badge: 'FREE MODEL',
+        contextLength: Number(model.context_length) || undefined,
+      };
+    })
+    .sort((a, b) => Number(b.strength === 'Coding focused') - Number(a.strength === 'Coding focused') || a.name.localeCompare(b.name));
 }
 
 export async function getFreeOpenRouterModels(fetchImpl = fetch) {

@@ -20,7 +20,7 @@ export default function SettingsModal({ credentials, config, focusProvider, onSa
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
-  const providers: Exclude<Provider, 'ollama'>[] = ['openrouter', 'gemini', 'groq'];
+  const providers: Exclude<Provider, 'ollama'>[] = ['openrouter', 'xkiro', 'gemini', 'groq'];
   return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
     <div className="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
       <div className="settings-header">
@@ -29,7 +29,7 @@ export default function SettingsModal({ credentials, config, focusProvider, onSa
         <button className="icon-button settings-close" onClick={onClose} aria-label="Close settings"><X size={20} /></button>
       </div>
       <div className="settings-body">
-        <div className="settings-section-heading"><span>AI PROVIDERS</span><span>01 — 03</span></div>
+        <div className="settings-section-heading"><span>AI PROVIDERS</span><span>01 — {String(providers.length).padStart(2, '0')}</span></div>
         {providers.map((provider) => <div key={provider} className={`settings-provider ${focusProvider === provider ? 'settings-provider-focus' : ''}`}>
           <ProviderIcon provider={provider} />
           <div className="settings-provider-content">
@@ -39,7 +39,7 @@ export default function SettingsModal({ credentials, config, focusProvider, onSa
               <input type={visible === provider ? 'text' : 'password'} value={draft.keys[provider]} onChange={(event) => setDraft((previous) => ({ ...previous, keys: { ...previous.keys, [provider]: event.target.value } }))} placeholder={config.configured[provider] ? 'Using workspace key · add your own to override' : 'Paste your API key here'} aria-label={`${PROVIDERS[provider].name} API key`} autoComplete="off" spellCheck={false} />
               <button aria-label={`${visible === provider ? 'Hide' : 'Show'} ${PROVIDERS[provider].name} key`} onClick={() => setVisible(visible === provider ? null : provider)}>{visible === provider ? <EyeOff size={16} /> : <Eye size={16} />}</button>
             </div>
-            <a href={PROVIDERS[provider].url} target="_blank" rel="noreferrer">Get a {PROVIDERS[provider].name} key <ArrowUpRight size={13} /></a>
+            <a href={PROVIDERS[provider].url} target="_blank" rel="noreferrer">Get your {PROVIDERS[provider].name} API key <ArrowUpRight size={13} /></a>
           </div>
         </div>)}
         <div className="settings-section-heading settings-search-heading"><span>LIVE WEB SEARCH</span><span>OPTIONAL</span></div>

@@ -42,6 +42,7 @@ function validSavedModel(): ModelInfo | null {
     if (!parsed || typeof parsed.id !== 'string' || typeof parsed.name !== 'string') return null;
     if (parsed.provider === 'openrouter') return isSelectableOpenRouterId(parsed.id) ? parsed : null;
     if (parsed.provider === 'ollama') return /^[a-zA-Z0-9._:/-]{1,160}$/.test(parsed.id) && !isNonChatModelId(parsed.id) ? parsed : null;
+    if (parsed.provider === 'xkiro') return /^[a-zA-Z0-9._:/-]{1,180}$/.test(parsed.id) && !isNonChatModelId(parsed.id) ? parsed : null;
     // Retired native-provider selections must not survive a catalog update.
     return CURATED_MODELS.some((model) => model.provider === parsed.provider && model.id === parsed.id) ? parsed : null;
   } catch { return null; }
@@ -75,7 +76,7 @@ export function saveSearchMode(mode: SearchMode) {
 }
 
 export function loadCredentials(): Credentials {
-  const empty: Credentials = { keys: { openrouter: '', gemini: '', groq: '' }, accessCode: '', searchKey: '', remember: false };
+  const empty: Credentials = { keys: { openrouter: '', xkiro: '', gemini: '', groq: '' }, accessCode: '', searchKey: '', remember: false };
   try {
     const persistent = localStorage.getItem(CREDS_KEY);
     const raw = persistent || sessionStorage.getItem(CREDS_KEY);
@@ -84,6 +85,7 @@ export function loadCredentials(): Credentials {
     return {
       keys: {
         openrouter: String(parsed.keys?.openrouter || ''),
+        xkiro: String(parsed.keys?.xkiro || ''),
         gemini: String(parsed.keys?.gemini || ''),
         groq: String(parsed.keys?.groq || ''),
       },

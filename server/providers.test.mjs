@@ -2,11 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   validateChat, buildRequest, readSSE, readLines, extractChunk,
-  friendlyUpstreamError, getFreeOpenRouterModels,
+  friendlyUpstreamError, getFreeOpenRouterModels, getFreeXkiroModels, isUsableFreeXkiroModel,
 } from './providers.mjs';
 
 const messages = [{ role: 'user', content: 'Build a button' }];
-const request = (provider, model) => validateChat({ provider, model, messages });
+const xkiroFreeModelIds = new Set(['mistralai/ministral-14b']);
+const request = (provider, model) => validateChat({ provider, model, messages }, false, xkiroFreeModelIds);
 const stream = (pieces) => new ReadableStream({
   start(controller) {
     for (const piece of pieces) controller.enqueue(new TextEncoder().encode(piece));
@@ -18,6 +19,9 @@ test('allows named free chat models, rejects random routing, paid and non-chat m
   assert.equal(request('openrouter', 'poolside/laguna-s-2.1:free').model, 'poolside/laguna-s-2.1:free');
   assert.equal(request('openrouter', 'qwen/qwen3-coder:free').model, 'qwen/qwen3-coder:free');
   assert.equal(request('gemini', 'gemini-3.8-flash').provider, 'gemini');
+  assert.equal(request('xkiro', 'mistralai/ministral-14b').provider, 'xkiro');
+  assert.throws(() => request('xkiro', 'openai/gpt-6-astra'), /xKiro’s live chat catalog/);
+  assert.throws(() => request('xkiro', 'meta/llama-guard-3'), /safety or utility model/);
   assert.throws(() => request('openrouter', 'openrouter/free'), /random free router/);
   assert.throws(() => request('openrouter', 'openai/gpt-5'), /Only specific OpenRouter :free chat models/);
   for (const id of [
@@ -47,6 +51,12 @@ test('builds provider-specific streaming requests without leaking keys into URLs
   assert.equal(JSON.parse(router.options.body).model, 'poolside/laguna-s-2.1:free');
   assert.equal(JSON.parse(router.options.body).stream, true);
   assert.match(router.options.headers.Authorization, /Bearer secret/);
+  const xkiro = buildRequest(request('xkiro', 'mistralai/ministral-14b'), 'secret', '');
+  assert.equal(xkiro.url, 'https://api.xkiro.com/v1/chat/completions');
+  assert.equal(JSON.parse(xkiro.options.body).model, 'mistralai/ministral-14b');
+  assert.equal(JSON.parse(xkiro.options.body).stream, true);
+  assert.equal(xkiro.options.headers.Authorization, 'Bearer secret');
+  assert.throws(() => buildRequest(request('xkiro', 'mistralai/ministral-14b'), '', ''), /xKiro API key/);
   const ollama = buildRequest(validateChat({ provider: 'ollama', model: 'qwen3:latest', messages }, true), '', 'http://127.0.0.1:11434/');
   assert.equal(ollama.url, 'http://127.0.0.1:11434/api/chat');
 });
@@ -80,4 +90,32 @@ test('catalog favors curated coding models and excludes safety/utility endpoints
   assert.equal(models[0].strength, 'Coding focused');
   assert.equal(models[2].strength, 'OpenRouter free');
   assert.doesNotMatch(friendlyUpstreamError(401, '{"error":{"message":"bad secret"}}', 'secret'), /secret/);
+});
+
+test('xKiro discovery includes every zero-priced free chat model, not only IDs with a free suffix', async () => {
+  const data = [
+    { id: 'mistralai/ministral-14b', display_name: 'Ministral 3 14B', modality: 'chat', access_tier: 'free', pricing: { input: 0, output: 0 }, capabilities: { vision: true, tools: true }, context_length: 256000 },
+    { id: 'cohere/north-mini-code', display_name: 'North Mini Code', modality: 'chat', access_tier: 'free', pricing: { input: 0, output: 0 }, capabilities: { tools: true }, context_length: 128000 },
+    { id: 'openai/gpt-6-astra', display_name: 'GPT-6 Astra', modality: 'chat', access_tier: 'paid', pricing: { input: 0, output: 0 } },
+    { id: 'vendor/free-but-priced', display_name: 'Paid in practice', modality: 'chat', access_tier: 'free', pricing: { input: 0, output: 0.2 } },
+    { id: 'vendor/cache-priced', display_name: 'Cached input charges', modality: 'chat', access_tier: 'free', pricing: { input: 0, output: 0, cache_write: 0.1 } },
+    { id: 'vendor/image-free', display_name: 'Image generator', modality: 'image', access_tier: 'free', pricing: { input: 0, output: 0 } },
+    { id: 'meta/llama-guard-3', display_name: 'Llama Guard', modality: 'chat', access_tier: 'free', pricing: { input: 0, output: 0 } },
+    { id: 'vendor/missing-price', display_name: 'Unknown pricing', modality: 'chat', access_tier: 'free', pricing: { input: 0 } },
+    { id: 'vendor/premium-free-price', display_name: 'Premium', modality: 'chat', access_tier: 'premium', pricing: { input: 0, output: 0 } },
+  ];
+  const models = await getFreeXkiroModels(async (url, options) => {
+    assert.equal(url, 'https://api.xkiro.com/v1/models');
+    assert.ok(options.signal);
+    return { ok: true, json: async () => ({ object: 'list', data }) };
+  });
+  assert.deepEqual(models.map((model) => model.id), ['cohere/north-mini-code', 'mistralai/ministral-14b']);
+  assert.equal(models[0].strength, 'Coding focused');
+  assert.match(models[1].description, /daily free-token allowance/i);
+  assert.equal(models[1].contextLength, 256000);
+  assert.equal(isUsableFreeXkiroModel(data[0]), true);
+  assert.equal(isUsableFreeXkiroModel(data[2]), false);
+  assert.equal(isUsableFreeXkiroModel(data[3]), false);
+  assert.equal(isUsableFreeXkiroModel(data[4]), false);
+  await assert.rejects(() => getFreeXkiroModels(async () => ({ ok: false })), /catalog unavailable/);
 });

@@ -232,7 +232,7 @@ a { color: inherit; }
 .picker-footer span { display: flex; align-items: center; gap: 7px; }.picker-footer span:first-child svg { color: var(--lime); }.picker-footer span:last-child { color: #9caf96; font-weight: 500; }
 .provider-icon { flex: none; display: inline-flex; align-items: center; justify-content: center; font-family: 'Space Grotesk', sans-serif; font-weight: 700; border: 1px solid; border-radius: 9px; }
 .provider-icon-small { width: 23px; height: 23px; font-size: 11px; border-radius: 6px; }.provider-icon-medium { width: 36px; height: 36px; font-size: 16px; }.provider-icon-large { width: 42px; height: 42px; font-size: 21px; border-radius: 11px; }
-.provider-openrouter { color: #d1bbff; background: #a988fb20; border-color: #ab8be642; }.provider-gemini { color: #a9c8ff; background: #6995ef1f; border-color: #84b2f343; }.provider-groq { color: #ffbe94; background: #ea975b1d; border-color: #df9e7045; }.provider-ollama { color: #c8f975; background: #c8f9751b; border-color: #badf8145; }
+.provider-openrouter { color: #d1bbff; background: #a988fb20; border-color: #ab8be642; }.provider-xkiro { color: #8eeaff; background: #42c9e51b; border-color: #65d7ee45; }.provider-gemini { color: #a9c8ff; background: #6995ef1f; border-color: #84b2f343; }.provider-groq { color: #ffbe94; background: #ea975b1d; border-color: #df9e7045; }.provider-ollama { color: #c8f975; background: #c8f9751b; border-color: #badf8145; }
 
 /* Messages */
 .messages-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }

@@ -33,6 +33,11 @@ test('migrates saved random/safety models while retaining named free chat select
     assert.equal(loadModel().id, coding.id);
     assert.equal(values.has(key), true);
 
+    const xkiro = { ...legacy, provider: 'xkiro', id: 'mistralai/ministral-14b', name: 'Ministral 3 14B', shortName: 'Ministral' };
+    saveModel(xkiro);
+    assert.equal(hasSavedModel(), true);
+    assert.equal(loadModel().id, xkiro.id);
+
     values.set(key, JSON.stringify({ ...legacy, provider: 'unsupported', id: 'unknown' }));
     assert.equal(hasSavedModel(), false);
     assert.equal(loadModel().id, 'gemini-3.8-flash');
@@ -69,10 +74,11 @@ test('web search preference and Tavily key persist with existing session/remembe
     assert.equal(loadSearchMode(), 'always');
     local.set('aiflux.search-mode.v1', 'invalid');
     assert.equal(loadSearchMode(), 'off');
-    const credentials = { keys: { openrouter: '', gemini: 'ai-key', groq: '' }, searchKey: 'tavily-key', accessCode: '', remember: false };
+    const credentials = { keys: { openrouter: '', xkiro: 'xkiro-key', gemini: 'ai-key', groq: '' }, searchKey: 'tavily-key', accessCode: '', remember: false };
     saveCredentials(credentials);
     assert.equal(local.has('aiflux.credentials.v1'), false);
     assert.equal(loadCredentials().searchKey, 'tavily-key');
+    assert.equal(loadCredentials().keys.xkiro, 'xkiro-key');
     saveCredentials({ ...credentials, remember: true });
     assert.equal(session.has('aiflux.credentials.v1'), false);
     assert.equal(local.has('aiflux.credentials.v1'), true);

@@ -18,7 +18,7 @@ const SEARCH_STATE = Object.freeze({
   always: 'Web search was requested, but no safe search was performed for this request. Be candid that current information was not verified; do not invent sources.',
 });
 
-const PROVIDER_NAMES = Object.freeze({ openrouter: 'OpenRouter', gemini: 'Gemini', groq: 'Groq', ollama: 'Ollama' });
+const PROVIDER_NAMES = Object.freeze({ openrouter: 'OpenRouter', xkiro: 'xKiro', gemini: 'Gemini', groq: 'Groq', ollama: 'Ollama' });
 
 export function buildAssistantPrompt({ provider, model, searchMode = 'off', searchPerformed = false } = {}) {
   const mode = Object.hasOwn(SEARCH_STATE, searchMode) ? searchMode : 'off';

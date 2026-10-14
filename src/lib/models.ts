@@ -10,6 +10,11 @@ export const PROVIDERS: Record<Provider, { name: string; initial: string; descri
     description: 'One key, a changing catalog of free open models.',
     url: 'https://openrouter.ai/keys', color: 'violet',
   },
+  xkiro: {
+    name: 'xKiro', initial: 'xK',
+    description: 'Live free chat models; a daily token allowance applies.',
+    url: 'https://xkiro.com/dashboard/api/keys', color: 'cyan',
+  },
   gemini: {
     name: 'Google Gemini', initial: '✦',
     description: 'Google AI Studio offers a free API tier for select models.',
@@ -32,7 +37,7 @@ export function modelDisplayName(modelId: string, allModels: ModelInfo[]): strin
 }
 
 export function groupModels(models: ModelInfo[]): { provider: Provider; models: ModelInfo[] }[] {
-  return (['openrouter', 'gemini', 'groq', 'ollama'] as Provider[])
+  return (['xkiro', 'openrouter', 'gemini', 'groq', 'ollama'] as Provider[])
     .map((provider) => ({ provider, models: models.filter((model) => model.provider === provider) }))
     .filter((group) => group.models.length > 0);
 }

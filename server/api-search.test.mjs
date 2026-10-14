@@ -6,7 +6,10 @@ import { createServer } from 'node:http';
 // reads operator keys once at startup. All upstream traffic is mocked below.
 process.env.TAVILY_API_KEY = '';
 process.env.AIFLUX_ACCESS_CODE = '';
-const { default: chatHandler } = await import('../api/chat.js');
+process.env.XKIRO_API_KEY = '';
+const [{ default: chatHandler }, { default: modelsHandler }] = await Promise.all([
+  import('../api/chat.js'), import('../api/models.js'),
+]);
 const nativeFetch = globalThis.fetch;
 
 const body = (searchMode, question = 'What is the current React release?') => ({
@@ -30,6 +33,68 @@ async function withServer(mockUpstream, run) {
     await new Promise((resolve) => server.close(resolve));
   }
 }
+
+async function withModelsServer(mockUpstream, run) {
+  const server = createServer((req, res) => modelsHandler(req, res));
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  globalThis.fetch = mockUpstream;
+  const get = () => nativeFetch(`http://127.0.0.1:${server.address().port}/api/models`);
+  try { await run(get); }
+  finally {
+    globalThis.fetch = nativeFetch;
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
+
+test('model catalog discovers xKiro free chat models and excludes every paid tier', async () => {
+  const catalog = {
+    data: [
+      { id: 'mistralai/ministral-14b', display_name: 'Ministral 3 14B', modality: 'chat', access_tier: 'free', pricing: { input: 0, output: 0 }, capabilities: { vision: true, tools: true }, context_length: 256000 },
+      { id: 'cohere/north-mini-code', display_name: 'North Mini Code', modality: 'chat', access_tier: 'free', pricing: { input: 0, output: 0 }, capabilities: { tools: true }, context_length: 128000 },
+      { id: 'openai/gpt-6-astra', display_name: 'GPT-6 Astra', modality: 'chat', access_tier: 'paid', pricing: { input: 1, output: 5 } },
+    ],
+  };
+  const calls = [];
+  await withModelsServer(async (url) => {
+    calls.push(url);
+    if (url === 'https://api.xkiro.com/v1/models') return json(catalog);
+    if (url === 'https://openrouter.ai/api/v1/models') return json({ data: [] });
+    throw new Error(`Unexpected catalog URL: ${url}`);
+  }, async (get) => {
+    const response = await get();
+    assert.equal(response.status, 200);
+    const result = await response.json();
+    assert.equal(result.xkiroCatalogAvailable, true);
+    assert.deepEqual(result.xkiroModels.map((model) => model.id), ['cohere/north-mini-code', 'mistralai/ministral-14b']);
+    assert.equal(result.xkiroModels[0].provider, 'xkiro');
+    assert.equal(result.xkiroModels[1].contextLength, 256000);
+    assert.ok(result.xkiroModels.every((model) => model.badge === 'FREE MODEL'));
+  });
+  assert.deepEqual(calls.sort(), ['https://api.xkiro.com/v1/models', 'https://openrouter.ai/api/v1/models']);
+});
+
+test('xKiro chat accepts a live free model and rejects a paid ID before any inference call', async () => {
+  const calls = [];
+  await withServer(async (url, options) => {
+    calls.push({ url, options });
+    if (url !== 'https://api.xkiro.com/v1/chat/completions') throw new Error(`Unexpected xKiro URL: ${url}`);
+    return new Response('data: {"choices":[{"delta":{"content":"Hello from xKiro."}}]}\n\ndata: [DONE]\n\n', { headers: { 'Content-Type': 'text/event-stream' } });
+  }, async (post) => {
+    const paid = await post({ provider: 'xkiro', model: 'openai/gpt-6-astra', messages: [{ role: 'user', content: 'Hello' }] });
+    assert.equal(paid.status, 400);
+    assert.match((await paid.json()).error, /currently listed as free/);
+    assert.equal(calls.length, 0);
+
+    const response = await post({ provider: 'xkiro', model: 'mistralai/ministral-14b', messages: [{ role: 'user', content: 'Hello' }] });
+    assert.equal(response.status, 200);
+    const events = parseEvents(await response.text());
+    assert.deepEqual(events.map((event) => event.type), ['start', 'delta', 'done']);
+    assert.equal(events[1].text, 'Hello from xKiro.');
+    assert.equal(calls[0].url, 'https://api.xkiro.com/v1/chat/completions');
+    assert.equal(calls[0].options.headers.Authorization, 'Bearer my-gemini-key');
+    assert.equal(JSON.parse(calls[0].options.body).model, 'mistralai/ministral-14b');
+  });
+});
 
 test('Vercel chat rejects invalid modes before making any upstream request', async () => {
   await withServer(() => { throw new Error('Unexpected upstream request'); }, async (post) => {

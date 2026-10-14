@@ -39,7 +39,7 @@ test('API gates shared keys and streams a local Ollama response end to end', asy
       ...process.env, NODE_ENV: 'production', PORT: String(port),
       OLLAMA_BASE_URL: `http://127.0.0.1:${ollamaPort}`,
       AIFLUX_ACCESS_CODE: 'test-access',
-      OPENROUTER_API_KEY: '', GEMINI_API_KEY: '', GROQ_API_KEY: '',
+      OPENROUTER_API_KEY: '', XKIRO_API_KEY: '', GEMINI_API_KEY: '', GROQ_API_KEY: '',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

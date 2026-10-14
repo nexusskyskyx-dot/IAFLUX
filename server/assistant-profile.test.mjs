@@ -8,6 +8,7 @@ const models = {
   gemini: 'gemini-2.5-flash',
   openrouter: 'poolside/laguna-s-2.1:free',
   groq: 'openai/gpt-oss-120b',
+  xkiro: 'mistralai/ministral-14b',
   ollama: 'qwen3:latest',
 };
 const messages = [
@@ -15,9 +16,10 @@ const messages = [
   { role: 'assistant', content: 'What does it need?' },
   { role: 'user', content: 'What can you do here?' },
 ];
+const xkiroFreeModelIds = new Set([models.xkiro]);
 const requestFor = (provider, searchMode = 'off') => validateChat({
   provider, model: models[provider], messages, searchMode,
-}, provider === 'ollama');
+}, provider === 'ollama', xkiroFreeModelIds);
 const systemText = (request) => {
   const body = JSON.parse(request.options.body);
   return body.systemInstruction?.parts?.[0]?.text ?? body.messages?.[0]?.content;
@@ -48,6 +50,7 @@ test('every provider includes the AIFLUX profile as a high-priority instruction 
     assert.match(prompt, /Web mode: off/, provider);
     assert.match(prompt, /No live search was performed/, provider);
     assert.ok(prompt.includes(models[provider]), `Current model missing from ${provider} prompt`);
+    if (provider === 'xkiro') assert.match(prompt, /user selected the xKiro model/);
     const body = JSON.parse(request.options.body);
     if (provider === 'gemini') {
       assert.deepEqual(body.contents.map(({ role }) => role), ['user', 'model', 'user']);

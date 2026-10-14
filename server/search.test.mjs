@@ -10,12 +10,14 @@ const modelIds = {
   openrouter: 'poolside/laguna-s-2.1:free',
   gemini: 'gemini-2.5-flash',
   groq: 'openai/gpt-oss-120b',
+  xkiro: 'mistralai/ministral-14b',
   ollama: 'qwen3:latest',
 };
+const xkiroFreeModelIds = new Set([modelIds.xkiro]);
 const input = (provider, question, searchMode = 'auto') => validateChat({
   provider, model: modelIds[provider], searchMode,
   messages: [{ role: 'user', content: question }],
-}, provider === 'ollama');
+}, provider === 'ollama', xkiroFreeModelIds);
 const response = (value, status = 200) => new Response(typeof value === 'string' ? value : JSON.stringify(value), { status });
 
 test('builds provider-specific non-streaming function-tool requests without sharing attachments with the planner', () => {

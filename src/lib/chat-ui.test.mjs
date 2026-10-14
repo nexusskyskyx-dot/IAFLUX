@@ -46,13 +46,16 @@ test('settings explain optional keyless Tavily search and offer a private key fi
   const vite = await createServer({ configFile: false, appType: 'custom', optimizeDeps: { noDiscovery: true, include: [] }, server: { middlewareMode: true } });
   try {
     const { default: SettingsModal } = await vite.ssrLoadModule('/src/components/SettingsModal.tsx');
-    const credentials = { keys: { openrouter: '', gemini: 'model-key', groq: '' }, accessCode: '', searchKey: '', remember: false };
-    const config = { configured: { openrouter: false, gemini: false, groq: false }, ollamaConfigured: false, searchConfigured: false, requiresAccessCode: false };
+    const credentials = { keys: { openrouter: '', xkiro: 'xkiro-key', gemini: 'model-key', groq: '' }, accessCode: '', searchKey: '', remember: false };
+    const config = { configured: { openrouter: false, xkiro: false, gemini: false, groq: false }, ollamaConfigured: false, searchConfigured: false, requiresAccessCode: false };
     const html = renderToStaticMarkup(React.createElement(SettingsModal, { credentials, config, onSave() {}, onClose() {} }));
     assert.match(html, /LIVE WEB SEARCH/);
     assert.match(html, /Keyless available/);
     assert.match(html, /Optional Tavily API key/);
     assert.match(html, /type="password"[^>]*aria-label="Tavily search API key"/);
     assert.match(html, /query goes to Tavily/);
+    assert.match(html, /xKiro/);
+    assert.match(html, /daily token allowance applies/);
+    assert.match(html, /xkiro\.com\/dashboard\/api\/keys/);
   } finally { await vite.close(); }
 });

@@ -19,6 +19,7 @@ test('Vercel functions route to the shared API instead of returning SPA HTML', a
     assert.match(response.headers.get('content-type'), /application\/json/);
     const config = await response.json();
     assert.equal(typeof config.configured.openrouter, 'boolean');
+    assert.equal(typeof config.configured.xkiro, 'boolean');
     assert.equal(typeof config.searchConfigured, 'boolean');
     const denied = await fetch(`${base}/api/chat`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },

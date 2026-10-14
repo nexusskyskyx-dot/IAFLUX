@@ -4,7 +4,7 @@ import { isNonChatModelId } from '../src/lib/model-policy.mjs';
 import { timingSafeEqual } from 'node:crypto';
 import {
   RequestError, validateChat, buildRequest, friendlyUpstreamError,
-  readSSE, readLines, extractChunk, getFreeOpenRouterModels,
+  readSSE, readLines, extractChunk, getFreeOpenRouterModels, getFreeXkiroModels,
 } from './providers.mjs';
 import { planWebSearch, searchWeb, withSearchContext } from './search.mjs';
 
@@ -14,6 +14,7 @@ const accessCode = process.env.AIFLUX_ACCESS_CODE || '';
 const envSearchKey = process.env.TAVILY_API_KEY?.trim() || '';
 const envKeys = {
   openrouter: process.env.OPENROUTER_API_KEY || '',
+  xkiro: process.env.XKIRO_API_KEY || '',
   gemini: process.env.GEMINI_API_KEY || '',
   groq: process.env.GROQ_API_KEY || '',
 };
@@ -40,19 +41,33 @@ app.get('/api/config', (_req, res) => {
   });
 });
 
-let catalogCache = { at: 0, models: [] };
-app.get('/api/models', async (_req, res) => {
-  let models = catalogCache.models;
-  let catalogAvailable = true;
-  if (Date.now() - catalogCache.at > 10 * 60 * 1000) {
-    try {
-      models = await getFreeOpenRouterModels();
-      catalogCache = { at: Date.now(), models };
-    } catch {
-      catalogAvailable = false;
-      models = catalogCache.models;
-    }
+const CATALOG_CACHE_TTL = 10 * 60 * 1000;
+const XKIRO_CATALOG_CACHE_TTL = 60 * 1000;
+const catalogCache = {
+  openrouter: { at: 0, models: [] },
+  xkiro: { at: 0, models: [] },
+};
+
+async function getCachedModels(cache, load, failClosed = false, ttl = CATALOG_CACHE_TTL) {
+  if (Date.now() - cache.at <= ttl) return { models: cache.models, available: true };
+  try {
+    const models = await load();
+    cache.at = Date.now();
+    cache.models = models;
+    return { models, available: true };
+  } catch {
+    // Keep OpenRouter's existing stale-list fallback, but never authorize xKiro against stale pricing.
+    return { models: failClosed ? [] : cache.models, available: false };
   }
+}
+
+app.get('/api/models', async (_req, res) => {
+  const [openrouterCatalog, xkiroCatalog] = await Promise.all([
+    getCachedModels(catalogCache.openrouter, getFreeOpenRouterModels),
+    getCachedModels(catalogCache.xkiro, getFreeXkiroModels, true, XKIRO_CATALOG_CACHE_TTL),
+  ]);
+  const { models, available: catalogAvailable } = openrouterCatalog;
+  const xkiroModels = xkiroCatalog.models;
   let ollamaModels = [];
   if (ollamaBaseUrl) {
     try {
@@ -67,7 +82,7 @@ app.get('/api/models', async (_req, res) => {
       }
     } catch { /* Ollama may not be running yet. */ }
   }
-  res.json({ models, ollamaModels, catalogAvailable });
+  res.json({ models, xkiroModels, ollamaModels, catalogAvailable, xkiroCatalogAvailable: xkiroCatalog.available });
 });
 
 const limits = new Map();
@@ -121,7 +136,15 @@ app.post('/api/chat', rateLimit, async (req, res) => {
     if (!correctAccessCode(req.get('x-aiflux-access-code'))) {
       throw new RequestError(403, 'Enter the workspace access code in Settings to continue.');
     }
-    const input = validateChat(req.body, Boolean(ollamaBaseUrl));
+    let xkiroFreeModelIds;
+    if (req.body?.provider === 'xkiro') {
+      const xkiroCatalog = await getCachedModels(catalogCache.xkiro, getFreeXkiroModels, true, XKIRO_CATALOG_CACHE_TTL);
+      if (!xkiroCatalog.available) {
+        throw new RequestError(503, 'The xKiro free-model catalog is temporarily unavailable, so AIFLUX cannot verify free access. Refresh the model list or use another provider.');
+      }
+      xkiroFreeModelIds = new Set(xkiroCatalog.models.map((model) => model.id));
+    }
+    const input = validateChat(req.body, Boolean(ollamaBaseUrl), xkiroFreeModelIds);
     const suppliedKey = req.get('x-aiflux-key')?.trim() || '';
     const suppliedSearchKey = req.get('x-aiflux-search-key')?.trim() || '';
     if (suppliedKey.length > 512 || suppliedSearchKey.length > 512) throw new RequestError(400, 'Invalid API key.');

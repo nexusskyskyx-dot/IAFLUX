@@ -1,4 +1,5 @@
-export type Provider = 'openrouter' | 'gemini' | 'groq' | 'ollama';
+export type KeyProvider = 'openrouter' | 'xkiro' | 'gemini' | 'groq';
+export type Provider = KeyProvider | 'ollama';
 export type SearchMode = 'off' | 'auto' | 'always';
 
 export interface WebSource {
@@ -56,14 +57,14 @@ export interface Conversation {
 }
 
 export interface AppConfig {
-  configured: Record<'openrouter' | 'gemini' | 'groq', boolean>;
+  configured: Record<KeyProvider, boolean>;
   ollamaConfigured: boolean;
   searchConfigured: boolean;
   requiresAccessCode: boolean;
 }
 
 export interface Credentials {
-  keys: Record<'openrouter' | 'gemini' | 'groq', string>;
+  keys: Record<KeyProvider, string>;
   accessCode: string;
   searchKey: string;
   remember: boolean;
@@ -71,6 +72,8 @@ export interface Credentials {
 
 export interface CatalogResponse {
   models: ModelInfo[];
+  xkiroModels: ModelInfo[];
   ollamaModels: ModelInfo[];
   catalogAvailable: boolean;
+  xkiroCatalogAvailable: boolean;
 }
