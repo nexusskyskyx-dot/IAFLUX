@@ -35,7 +35,9 @@ test('the central capability profile covers shipped features and keeps identity 
   assert.match(prompt, /Canvas turns named fenced code blocks into files/);
   assert.match(prompt, /HTML or SVG projects in a sandbox/);
   assert.match(prompt, /attach local text\/code files/);
-  assert.match(prompt, /read-only GitHub repository file, issue, or pull request/);
+  assert.match(prompt, /GitHub repository file, issue, or pull request/);
+  assert.match(prompt, /after the user reviews the exact contents and explicitly confirms/);
+  assert.match(prompt, /model itself has no GitHub write tool/);
   assert.match(prompt, /local browser conversations/);
   assert.match(prompt, /cannot directly edit an existing Canvas file/);
   assert.match(prompt, /cannot.*run commands or tests, deploy code/);

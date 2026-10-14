@@ -61,3 +61,22 @@ test('settings explain optional keyless Tavily search and offer a private key fi
     assert.match(html, /Auto-select a recommended model on connect/);
   } finally { await vite.close(); }
 });
+
+test('Canvas exposes an explicit GitHub publishing action with a review-before-publish dialog', async () => {
+  const vite = await createServer({ configFile: false, appType: 'custom', optimizeDeps: { noDiscovery: true, include: [] }, server: { middlewareMode: true } });
+  try {
+    const { default: Canvas } = await vite.ssrLoadModule('/src/components/Canvas.tsx');
+    const { default: GitHubPublishModal } = await vite.ssrLoadModule('/src/components/GitHubPublishModal.tsx');
+    const conversation = { id: 'test-chat', title: 'Publish', createdAt: 1, updatedAt: 1, files: [], selectedFileId: null, messages: [] };
+    const canvasHtml = renderToStaticMarkup(React.createElement(Canvas, {
+      conversation, mobileOpen: false, onClose() {}, onSelectFile() {}, onUpdateFile() {},
+      onCreateFile() {}, onDeleteFile() {}, onAddContext() {}, onNotify() {}, onPublishGitHub() {},
+    }));
+    assert.match(canvasHtml, /Review and publish Canvas files to GitHub/);
+    const modalHtml = renderToStaticMarkup(React.createElement(GitHubPublishModal, {
+      files: [], onClose() {}, onNotify() {}, onConnect() {},
+    }));
+    assert.match(modalHtml, /REVIEW BEFORE PUBLISH/);
+    assert.match(modalHtml, /Nothing is written to GitHub until you review and confirm/);
+  } finally { await vite.close(); }
+});

@@ -125,28 +125,33 @@ async function readJson(response) {
   catch { return {}; }
 }
 
-async function githubFetch(path, token, fetchImpl) {
+async function githubFetch(path, token, fetchImpl, { method = 'GET', body } = {}) {
   if (!path.startsWith('/') || path.startsWith('//') || path.includes('..')) throw new GitHubError(400, 'Invalid GitHub API request.');
+  const headers = {
+    Accept: 'application/vnd.github+json',
+    Authorization: `Bearer ${token}`,
+    'X-GitHub-Api-Version': API_VERSION,
+    'User-Agent': 'AIFLUX',
+  };
+  const options = { headers, signal: AbortSignal.timeout(12_000) };
+  if (method !== 'GET') {
+    options.method = method;
+    headers['Content-Type'] = 'application/json';
+    options.body = JSON.stringify(body || {});
+  }
   let response;
   try {
-    response = await fetchImpl(`https://api.github.com${path}`, {
-      headers: {
-        Accept: 'application/vnd.github+json',
-        Authorization: `Bearer ${token}`,
-        'X-GitHub-Api-Version': API_VERSION,
-        'User-Agent': 'AIFLUX',
-      },
-      signal: AbortSignal.timeout(12_000),
-    });
+    response = await fetchImpl(`https://api.github.com${path}`, options);
   } catch {
     throw new GitHubError(502, 'Could not reach GitHub. Try again in a moment.');
   }
   const data = await readJson(response);
   if (!response.ok) {
     if (response.status === 401) throw new GitHubError(401, 'Your GitHub connection expired. Please reconnect it.');
-    if (response.status === 403) throw new GitHubError(403, 'GitHub denied this request. Confirm the app is installed with the required read permissions.');
+    if (response.status === 403) throw new GitHubError(403, 'GitHub denied this request. Confirm the app is installed with the required repository permissions. For publishing, grant Contents read and write; pull-request creation also needs Pull requests read and write.');
     if (response.status === 404) throw new GitHubError(404, 'That GitHub resource is not available to this app installation.');
     if (response.status === 429) throw new GitHubError(429, 'GitHub is rate-limiting this connection. Please wait and try again.');
+    if (response.status === 409 || response.status === 422) throw new GitHubError(409, 'GitHub could not apply these changes. The branch may have changed, already exists, or a repository rule may block the write. Refresh and try again.');
     throw new GitHubError(502, 'GitHub could not complete this request.');
   }
   return data;
@@ -214,11 +219,73 @@ function requireSession(config, fetchImpl) {
 }
 
 function sourcePathAllowed(path) {
-  if (typeof path !== 'string' || path.length > 400 || path.startsWith('/') || path.includes('\\')) return false;
+  if (typeof path !== 'string' || path.length > 400 || path.startsWith('/') || path.includes('\\') || /[\u0000-\u001f\u007f]/.test(path)) return false;
   const parts = path.split('/');
   if (parts.some((part) => !part || part === '.' || part === '..' || EXCLUDED_PATH_PARTS.has(part.toLowerCase()))) return false;
   if (SENSITIVE_FILE.test(path)) return false;
   return SAFE_TEXT_EXTENSIONS.test(path);
+}
+
+const MAX_CHANGE_FILES = 20;
+const MAX_TOTAL_CHANGE_BYTES = 150_000;
+
+function safeBranchName(value) {
+  if (typeof value !== 'string' || value.length > 180 || !/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(value)) return false;
+  if (value.includes('..') || value.includes('//') || value.includes('@{') || value.endsWith('/') || value.endsWith('.')) return false;
+  return value.split('/').every((part) => part && part !== '.' && part !== '..' && !part.startsWith('.') && !part.endsWith('.lock'));
+}
+
+function validateChanges(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new GitHubError(400, 'Invalid GitHub change request.');
+  const mode = body.mode;
+  if (!['pull_request', 'push'].includes(mode)) throw new GitHubError(400, 'Choose either a pull request or a direct push.');
+  const repoParts = typeof body.fullName === 'string' ? body.fullName.split('/') : [];
+  const encodedRepo = repositoryName(body.fullName);
+  if (!encodedRepo || repoParts.length !== 2) throw new GitHubError(400, 'Choose a valid repository.');
+  const baseBranch = body.baseBranch;
+  if (!safeBranchName(baseBranch)) throw new GitHubError(400, 'Choose a valid base branch.');
+  const expectedBaseSha = typeof body.expectedBaseSha === 'string' ? body.expectedBaseSha : '';
+  if (!/^[a-f0-9]{40,64}$/i.test(expectedBaseSha)) throw new GitHubError(400, 'Refresh the branch list and review the changes again.');
+  const branchName = mode === 'pull_request' ? body.branchName : body.targetBranch;
+  if (!safeBranchName(branchName)) throw new GitHubError(400, 'Choose a valid target branch.');
+  if (mode === 'pull_request' && branchName === baseBranch) throw new GitHubError(400, 'The pull request branch must be different from its base branch.');
+  if (mode === 'push' && branchName !== baseBranch) throw new GitHubError(400, 'For a direct push, the target branch must match the selected branch.');
+  const commitMessage = typeof body.commitMessage === 'string' ? body.commitMessage.trim() : '';
+  if (!commitMessage || commitMessage.length > 160 || /[\r\n\u0000]/.test(commitMessage)) throw new GitHubError(400, 'Enter a one-line commit message of 1–160 characters.');
+  const title = mode === 'pull_request' && typeof body.pullRequestTitle === 'string' ? body.pullRequestTitle.trim() : commitMessage;
+  const description = mode === 'pull_request' && typeof body.pullRequestBody === 'string' ? body.pullRequestBody.trim() : '';
+  if (mode === 'pull_request' && (!title || title.length > 256 || /[\r\n\u0000]/.test(title) || description.length > 4000 || /[\u0000]/.test(description))) {
+    throw new GitHubError(400, 'The pull request title or description is invalid.');
+  }
+  if (!Array.isArray(body.files) || !body.files.length || body.files.length > MAX_CHANGE_FILES) {
+    throw new GitHubError(400, `Select between 1 and ${MAX_CHANGE_FILES} files to publish.`);
+  }
+  const paths = new Set();
+  let totalBytes = 0;
+  const files = body.files.map((file) => {
+    if (!file || typeof file !== 'object' || !sourcePathAllowed(file.path) || typeof file.content !== 'string' || file.content.includes(String.fromCharCode(0))) {
+      throw new GitHubError(400, 'A selected path is unsupported, sensitive, or contains invalid file content.');
+    }
+    const bytes = Buffer.byteLength(file.content, 'utf8');
+    if (bytes > MAX_FILE_BYTES) throw new GitHubError(413, 'Each published file must be 30 KB or smaller.');
+    totalBytes += bytes;
+    if (totalBytes > MAX_TOTAL_CHANGE_BYTES) throw new GitHubError(413, 'The total selected file size must be 150 KB or smaller.');
+    if (paths.has(file.path)) throw new GitHubError(400, 'A repository path was selected more than once.');
+    paths.add(file.path);
+    return { path: file.path, content: file.content };
+  });
+  return { mode, owner: repoParts[0], repo: repoParts[1], apiRepo: encodedRepo.join('/'), fullName: body.fullName, baseBranch, expectedBaseSha, branchName, commitMessage, title, description, files };
+}
+
+function sameOriginRequest(req) {
+  const origin = req.get('origin');
+  const host = req.get('host');
+  if (!origin || !host) return false;
+  try {
+    const forwarded = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+    const protocol = forwarded || req.protocol;
+    return new URL(origin).origin === `${protocol}://${host}`;
+  } catch { return false; }
 }
 
 function repositoryName(value) {
@@ -404,12 +471,89 @@ export function createGitHubRouter({ env = process.env, fetchImpl = fetch } = {}
     if (!owner || !repo || !sourcePathAllowed(path)) throw new GitHubError(400, 'Choose a supported text or code file.');
     const url = `/repos/${owner}/${repo}/contents/${path.split('/').map(encodeURIComponent).join('/')}?ref=${encodeURIComponent(String(req.query.ref || ''))}`;
     const file = await githubFetch(url, session.token, fetchImpl);
-    if (file.type !== 'file' || !Number.isSafeInteger(file.size) || file.size > MAX_FILE_BYTES || typeof file.content !== 'string') {
+    if (file.type !== 'file' || file.encoding !== 'base64' || !Number.isSafeInteger(file.size) || file.size > MAX_FILE_BYTES || typeof file.content !== 'string') {
       throw new GitHubError(413, 'This file is too large or is not a supported text file (30 KB maximum).');
     }
-    const content = Buffer.from(file.content.replace(/\s/g, ''), 'base64').toString('utf8');
+    let content;
+    try { content = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.from(file.content.replace(/\s/g, ''), 'base64')); }
+    catch { throw new GitHubError(413, 'This repository file is not valid UTF-8 text.'); }
     if (Buffer.byteLength(content, 'utf8') > MAX_FILE_BYTES || content.includes('\u0000')) throw new GitHubError(413, 'This file is too large or is not plain text.');
     return res.json({ path, content });
+  }));
+
+  router.get('/branches', handle(async (req, res) => {
+    const session = await requireGitHubSession(req, res);
+    const encodedRepo = repositoryName(req.query.full_name);
+    if (!encodedRepo) throw new GitHubError(400, 'Choose a valid repository.');
+    const result = await githubFetch(`/repos/${encodedRepo.join('/')}/branches?per_page=100`, session.token, fetchImpl);
+    const branches = (Array.isArray(result) ? result : [])
+      .map((branch) => ({ name: String(branch.name || ''), protected: Boolean(branch.protected), commitSha: String(branch.commit?.sha || '') }))
+      .filter((branch) => safeBranchName(branch.name) && /^[a-f0-9]{40,64}$/i.test(branch.commitSha));
+    return res.json({ branches });
+  }));
+
+  router.post('/changes', handle(async (req, res) => {
+    if (!sameOriginRequest(req)) throw new GitHubError(403, 'GitHub changes must be submitted from this AIFLUX page. Refresh and try again.');
+    const session = await requireGitHubSession(req, res);
+    const changes = validateChanges(req.body);
+    const repoPath = `/repos/${changes.apiRepo}`;
+    const repository = await githubFetch(repoPath, session.token, fetchImpl);
+    if (repository.archived || repository.disabled) throw new GitHubError(409, 'This repository is archived or disabled and cannot accept changes.');
+
+    const branch = await githubFetch(`${repoPath}/branches/${encodeURIComponent(changes.baseBranch)}`, session.token, fetchImpl);
+    const baseCommitSha = branch.commit?.sha;
+    const baseTreeSha = branch.commit?.commit?.tree?.sha;
+    if (typeof baseCommitSha !== 'string' || typeof baseTreeSha !== 'string') throw new GitHubError(502, 'GitHub did not return the selected branch commit. Refresh the repository and try again.');
+    if (baseCommitSha !== changes.expectedBaseSha) throw new GitHubError(409, 'The selected branch changed after your review. Refresh the branch list and review the changes again.');
+
+    const treeEntries = [];
+    for (const file of changes.files) {
+      const blob = await githubFetch(`${repoPath}/git/blobs`, session.token, fetchImpl, {
+        method: 'POST', body: { content: file.content, encoding: 'utf-8' },
+      });
+      if (typeof blob.sha !== 'string') throw new GitHubError(502, 'GitHub did not accept one of the selected files. No branch was updated.');
+      treeEntries.push({ path: file.path, mode: '100644', type: 'blob', sha: blob.sha });
+    }
+    const tree = await githubFetch(`${repoPath}/git/trees`, session.token, fetchImpl, {
+      method: 'POST', body: { base_tree: baseTreeSha, tree: treeEntries },
+    });
+    if (typeof tree.sha !== 'string') throw new GitHubError(502, 'GitHub did not create the proposed file tree. No branch was updated.');
+    if (tree.sha === baseTreeSha) throw new GitHubError(409, 'The selected files contain no changes compared with this branch.');
+
+    const commit = await githubFetch(`${repoPath}/git/commits`, session.token, fetchImpl, {
+      method: 'POST', body: { message: changes.commitMessage, tree: tree.sha, parents: [baseCommitSha] },
+    });
+    if (typeof commit.sha !== 'string') throw new GitHubError(502, 'GitHub did not create the proposed commit. No branch was updated.');
+    const commitUrl = typeof commit.html_url === 'string' ? commit.html_url : `https://github.com/${changes.fullName}/commit/${commit.sha}`;
+
+    if (changes.mode === 'pull_request') {
+      await githubFetch(`${repoPath}/git/refs`, session.token, fetchImpl, {
+        method: 'POST', body: { ref: `refs/heads/${changes.branchName}`, sha: commit.sha },
+      });
+      let pullRequestUrl = '';
+      let warning = '';
+      try {
+        const pullRequest = await githubFetch(`${repoPath}/pulls`, session.token, fetchImpl, {
+          method: 'POST', body: {
+            title: changes.title,
+            body: changes.description,
+            head: `${changes.owner}:${changes.branchName}`,
+            base: changes.baseBranch,
+            draft: true,
+          },
+        });
+        pullRequestUrl = typeof pullRequest.html_url === 'string' ? pullRequest.html_url : '';
+      } catch {
+        warning = `The changes were pushed to ${changes.branchName}, but GitHub could not open a pull request. Confirm Pull requests is set to Read and write, then open a PR from that branch.`;
+      }
+      return res.status(201).json({ mode: changes.mode, branch: changes.branchName, commitUrl, pullRequestUrl, warning });
+    }
+
+    const ref = changes.branchName.split('/').map(encodeURIComponent).join('/');
+    await githubFetch(`${repoPath}/git/refs/heads/${ref}`, session.token, fetchImpl, {
+      method: 'PATCH', body: { sha: commit.sha, force: false },
+    });
+    return res.status(201).json({ mode: changes.mode, branch: changes.branchName, commitUrl, pullRequestUrl: '', warning: '' });
   }));
 
   return router;

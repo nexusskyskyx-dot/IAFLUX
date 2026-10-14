@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowUpRight, Check, CircleDot, FileCode2, FolderGit2, Github, GitPullRequest, LoaderCircle, LogOut, LockKeyhole, Search, X } from 'lucide-react';
+import { ArrowUpRight, Check, CircleDot, FileCode2, FolderGit2, Github, GitPullRequest, LoaderCircle, LogOut, LockKeyhole, Search, ShieldCheck, X } from 'lucide-react';
 import type { AttachedFile } from '../types';
 
 interface Props {
@@ -166,20 +166,20 @@ export default function GitHubContextModal({ onClose, onUseContext, onNotify }: 
     <section className="github-modal" role="dialog" aria-modal="true" aria-labelledby="github-title">
       <header className="github-header">
         <div className="github-header-icon"><Github size={21} /></div>
-        <div className="github-header-title"><div className="eyebrow">READ-ONLY WORKSPACE CONTEXT</div><h2 id="github-title">Connect your code<span>.</span></h2><p>Browse installed repositories, files, issues, and pull requests.</p></div>
-        {status?.connected && <span className="github-readonly-badge"><LockKeyhole size={12} /> READ ONLY</span>}
+        <div className="github-header-title"><div className="eyebrow">GITHUB CONTEXT & APPROVED PUBLISHING</div><h2 id="github-title">Connect your code<span>.</span></h2><p>Browse repository context here; review and confirm Canvas changes before publishing.</p></div>
+        {status?.connected && <span className="github-readonly-badge"><ShieldCheck size={12} /> USER-APPROVED WRITES</span>}
         <button className="icon-button settings-close" onClick={onClose} aria-label="Close GitHub browser"><X size={20} /></button>
       </header>
 
       {!status ? <div className="github-loading"><LoaderCircle size={19} className="spin" /> Checking GitHub connection…</div> : !status.configured ? <div className="github-unconfigured">
         <span className="github-state-icon"><LockKeyhole size={24} /></span>
         <h3>GitHub OAuth is not configured</h3>
-        <p>A workspace administrator needs to create a GitHub App with read-only repository, issue, and pull request permissions, then add its OAuth credentials to the server environment.</p>
+        <p>A workspace administrator needs to create a GitHub App with Contents read/write, Pull requests read/write, and Issues read-only permissions, then add its OAuth credentials to the server environment.</p>
         <button className="secondary-button" onClick={onClose}>Close</button>
       </div> : !status.connected ? <div className="github-connect-state">
         <span className="github-state-icon"><Github size={26} /></span>
         <h3>Bring a repository into the conversation</h3>
-        <p>Sign in with GitHub and install the AIFLUX GitHub App on the repositories you want to use. AIFLUX only reads repository content, issues, and pull requests.</p>
+        <p>Sign in with GitHub and install the AIFLUX GitHub App on repositories you can access. AIFLUX only publishes Canvas changes after you review the exact files and explicitly confirm.</p>
         {error && <div className="github-error" role="alert">{error}</div>}
         <a className="primary-button github-connect-button" href="/api/github?op=connect"><Github size={16} /> Continue with GitHub <ArrowUpRight size={15} /></a>
         <small>Access stays on the server in an encrypted, HttpOnly session cookie. No token is pasted into chat.</small>

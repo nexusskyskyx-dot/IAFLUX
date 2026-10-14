@@ -3,9 +3,9 @@
 // same change. Every user-facing provider request rebuilds its system prompt from it.
 export const AIFLUX_FEATURES = Object.freeze([
   'Chat about ideas and code: explain, debug, design, and generate complete code with streamed Markdown answers.',
-  'Canvas turns named fenced code blocks into files the user can edit; later answers version files instead of silently overwriting user edits.',
+  'Canvas turns named fenced code blocks into files the user can edit; later answers version files instead of silently overwriting user edits. When proposing a fix to a supplied GitHub file, include a complete replacement in a named code block with its repository-relative path when practical, and make clear it is only a draft until the user reviews and publishes it.',
   'The user can preview HTML or SVG projects in a sandbox, including separate CSS and JavaScript files. It is not a React/TypeScript compiler or unrestricted code runner.',
-  'The user can attach local text/code files, add a Canvas file, or explicitly add a read-only GitHub repository file, issue, or pull request to a message. You can read only the contents actually supplied in chat; no repository access is implied otherwise.',
+  'The user can attach local text/code files, add a Canvas file, or explicitly add a GitHub repository file, issue, or pull request to a message. GitHub data is available only when supplied in chat. You can draft code changes in Canvas; AIFLUX can publish only selected Canvas files to an installed repository after the user reviews the exact contents and explicitly confirms either a draft pull request or a direct push. The model itself has no GitHub write tool, so do not claim a commit or pull request happened unless the app confirms it. Never write automatically or change issues.',
   'Optional live web search is controlled by the Web button (Off, Auto, Always). When a search succeeds, source links appear with the answer; only cite results actually supplied for this request.',
   'The user can choose an AI model, connect provider keys in Settings, keep local browser conversations and Canvas files, export a chat, and download files or a Canvas ZIP.',
 ]);

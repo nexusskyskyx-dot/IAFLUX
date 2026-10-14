@@ -17,6 +17,7 @@ function response(value, status = 200) {
 
 async function startApp(fetchImpl, testEnv = env) {
   const app = express();
+  app.use(express.json());
   app.use('/api/github', createGitHubRouter({ env: testEnv, fetchImpl }));
   const server = createServer(app);
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -72,7 +73,8 @@ function mockGitHubFetch(requests) {
     ]);
     if (path === '/repos/octo-org/private-repo/issues/4') return response({ number: 4, title: 'Bug report', state: 'open', html_url: 'https://github.com/octo-org/private-repo/issues/4', user: { login: 'octocat' }, body: 'Full issue text.' });
     if (path === '/repos/octo-org/private-repo/pulls/9') return response({ number: 9, title: 'Improve editor', state: 'open', html_url: 'https://github.com/octo-org/private-repo/pull/9', user: { login: 'contributor' }, body: 'Full pull request description.' });
-    if (path === '/repos/octo-org/private-repo/contents/README.md') return response({ type: 'file', size: 12, content: Buffer.from('# Private repo').toString('base64') });
+    if (path === '/repos/octo-org/private-repo/contents/README.md') return response({ type: 'file', encoding: 'base64', size: 12, content: Buffer.from('# Private repo').toString('base64') });
+    if (path === '/repos/octo-org/private-repo/contents/invalid.txt') return response({ type: 'file', encoding: 'base64', size: 2, content: Buffer.from([0xff, 0xfe]).toString('base64') });
     return response({ message: 'Not found' }, 404);
   };
 }
@@ -99,10 +101,11 @@ test('GitHub source browser excludes secret, binary, and generated paths', () =>
   assert.equal(sourcePathAllowed('id_rsa.key'), false);
   assert.equal(sourcePathAllowed('node_modules/pkg/index.js'), false);
   assert.equal(sourcePathAllowed('../outside.ts'), false);
+  assert.equal(sourcePathAllowed('src/\u0001unsafe.ts'), false);
   assert.equal(sourcePathAllowed('assets/image.png'), false);
 });
 
-test('GitHub OAuth is state-checked and grants read-only repository, issue, and PR browsing', async (t) => {
+test('GitHub OAuth is state-checked and provides repository, issue, and PR context reads', async (t) => {
   const requests = [];
   const { server, base } = await startApp(mockGitHubFetch(requests));
   t.after(() => new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
@@ -164,6 +167,8 @@ test('GitHub OAuth is state-checked and grants read-only repository, issue, and 
   assert.equal(pull.pullRequest.body, 'Full pull request description.');
   const file = await fetch(`${base}/api/github/file?full_name=octo-org%2Fprivate-repo&path=README.md&ref=main`, { headers: { cookie: sessionCookie } }).then((result) => result.json());
   assert.equal(file.content, '# Private repo');
+  const invalidTextFile = await fetch(`${base}/api/github/file?full_name=octo-org%2Fprivate-repo&path=invalid.txt&ref=main`, { headers: { cookie: sessionCookie } });
+  assert.equal(invalidTextFile.status, 413);
   const unsafeFile = await fetch(`${base}/api/github/file?full_name=octo-org%2Fprivate-repo&path=.env&ref=main`, { headers: { cookie: sessionCookie } });
   assert.equal(unsafeFile.status, 400);
 
@@ -217,4 +222,163 @@ test('GitHub status refreshes an expired app user token server-side', async (t) 
   const repos = await fetch(`${base}/api/github/repos`, { headers: { cookie: cookiePair(refreshedCookie) } });
   assert.equal(repos.status, 200);
   assert.ok(requests.some((request) => request.headers.Authorization === 'Bearer ghu-refreshed-token'));
+});
+
+test('GitHub publishing previews branch state and requires same-origin, authenticated requests', async (t) => {
+  const requests = [];
+  const fetchImpl = async (url, options = {}) => {
+    const parsed = new URL(url);
+    requests.push({ url: parsed, method: options.method || 'GET', headers: options.headers || {}, body: options.body || '' });
+    return response({ message: 'Unexpected GitHub request' }, 404);
+  };
+  const { server, base } = await startApp(fetchImpl);
+  t.after(() => new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
+  const session = { token: 'ghu-publish-token', login: 'octocat', issuedAt: Date.now(), expiresAt: Date.now() + 60 * 60_000 };
+  const cookie = `aiflux_github_session=${encodeURIComponent(sealSession(session, env.GITHUB_SESSION_SECRET))}`;
+  const headers = { Cookie: cookie, 'Content-Type': 'application/json' };
+  const body = {
+    fullName: 'octo-org/private-repo', mode: 'pull_request', baseBranch: 'main', expectedBaseSha: 'a'.repeat(40),
+    branchName: 'aiflux/ai-fix', commitMessage: 'Fix the editor',
+    files: [{ path: 'src/editor.ts', content: 'export const fixed = true;\n' }],
+  };
+
+  const crossOrigin = await fetch(`${base}/api/github/changes`, {
+    method: 'POST', headers: { ...headers, Origin: 'https://evil.example' }, body: JSON.stringify(body),
+  });
+  assert.equal(crossOrigin.status, 403);
+  assert.equal(requests.length, 0);
+
+  const noSession = await fetch(`${base}/api/github/changes`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Origin: base }, body: JSON.stringify(body),
+  });
+  assert.equal(noSession.status, 401);
+  assert.equal(requests.length, 0);
+
+  const unsafeFile = await fetch(`${base}/api/github/changes`, {
+    method: 'POST', headers: { ...headers, Origin: base }, body: JSON.stringify({ ...body, files: [{ path: '.env', content: 'SECRET=value' }] }),
+  });
+  assert.equal(unsafeFile.status, 400);
+  assert.equal(requests.length, 0);
+});
+
+test('GitHub branch list supports review and a confirmed publish creates a draft PR without force-pushing', async (t) => {
+  const requests = [];
+  const baseSha = 'a'.repeat(40);
+  const baseTreeSha = 'b'.repeat(40);
+  const changedTreeSha = 'c'.repeat(40);
+  const commitSha = 'd'.repeat(40);
+  const fetchImpl = async (url, options = {}) => {
+    const parsed = new URL(url);
+    const method = options.method || 'GET';
+    const body = options.body ? JSON.parse(String(options.body)) : {};
+    requests.push({ url: parsed, method, headers: options.headers || {}, body });
+    if (parsed.hostname !== 'api.github.com') return response({ message: 'Unexpected host' }, 404);
+    if (method === 'GET' && parsed.pathname === '/repos/octo-org/private-repo/branches') {
+      return response([{ name: 'main', protected: true, commit: { sha: baseSha } }]);
+    }
+    if (method === 'GET' && parsed.pathname === '/repos/octo-org/private-repo') return response({ full_name: 'octo-org/private-repo', archived: false });
+    if (method === 'GET' && parsed.pathname === '/repos/octo-org/private-repo/branches/main') {
+      return response({ commit: { sha: baseSha, commit: { tree: { sha: baseTreeSha } } } });
+    }
+    if (method === 'POST' && parsed.pathname === '/repos/octo-org/private-repo/git/blobs') return response({ sha: 'blob-sha' }, 201);
+    if (method === 'POST' && parsed.pathname === '/repos/octo-org/private-repo/git/trees') {
+      assert.equal(body.base_tree, baseTreeSha);
+      assert.deepEqual(body.tree.map(({ path, mode, type }) => ({ path, mode, type })), [{ path: 'src/editor.ts', mode: '100644', type: 'blob' }]);
+      return response({ sha: changedTreeSha }, 201);
+    }
+    if (method === 'POST' && parsed.pathname === '/repos/octo-org/private-repo/git/commits') {
+      assert.equal(body.tree, changedTreeSha);
+      assert.deepEqual(body.parents, [baseSha]);
+      assert.equal(body.message, 'Fix the editor');
+      return response({ sha: commitSha, html_url: `https://github.com/octo-org/private-repo/commit/${commitSha}` }, 201);
+    }
+    if (method === 'POST' && parsed.pathname === '/repos/octo-org/private-repo/git/refs') {
+      assert.equal(body.ref, 'refs/heads/aiflux/ai-fix');
+      assert.equal(body.sha, commitSha);
+      return response({ ref: 'refs/heads/aiflux/ai-fix' }, 201);
+    }
+    if (method === 'POST' && parsed.pathname === '/repos/octo-org/private-repo/pulls') {
+      assert.equal(body.head, 'octo-org:aiflux/ai-fix');
+      assert.equal(body.base, 'main');
+      assert.equal(body.draft, true);
+      return response({ html_url: 'https://github.com/octo-org/private-repo/pull/12' }, 201);
+    }
+    return response({ message: 'Unexpected GitHub request' }, 404);
+  };
+  const { server, base } = await startApp(fetchImpl);
+  t.after(() => new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
+  const session = { token: 'ghu-publish-token', login: 'octocat', issuedAt: Date.now(), expiresAt: Date.now() + 60 * 60_000 };
+  const cookie = `aiflux_github_session=${encodeURIComponent(sealSession(session, env.GITHUB_SESSION_SECRET))}`;
+  const headers = { Cookie: cookie, 'Content-Type': 'application/json', Origin: base };
+
+  const branchList = await fetch(`${base}/api/github/branches?full_name=octo-org%2Fprivate-repo`, { headers: { Cookie: cookie } });
+  assert.equal(branchList.status, 200);
+  assert.deepEqual(await branchList.json(), { branches: [{ name: 'main', protected: true, commitSha: baseSha }] });
+
+  const published = await fetch(`${base}/api/github/changes`, {
+    method: 'POST', headers, body: JSON.stringify({
+      fullName: 'octo-org/private-repo', mode: 'pull_request', baseBranch: 'main', expectedBaseSha: baseSha,
+      branchName: 'aiflux/ai-fix', commitMessage: 'Fix the editor', pullRequestTitle: 'Fix the editor',
+      pullRequestBody: 'Reviewed AI-assisted changes.', files: [{ path: 'src/editor.ts', content: 'export const fixed = true;\n' }],
+    }),
+  });
+  assert.equal(published.status, 201);
+  assert.deepEqual(await published.json(), {
+    mode: 'pull_request', branch: 'aiflux/ai-fix',
+    commitUrl: `https://github.com/octo-org/private-repo/commit/${commitSha}`,
+    pullRequestUrl: 'https://github.com/octo-org/private-repo/pull/12', warning: '',
+  });
+  const apiWrites = requests.filter((request) => request.url.hostname === 'api.github.com' && request.method !== 'GET');
+  assert.deepEqual(apiWrites.map((request) => request.method), ['POST', 'POST', 'POST', 'POST', 'POST']);
+  assert.ok(requests.every((request) => request.headers.Authorization === 'Bearer ghu-publish-token'));
+});
+
+test('GitHub direct push updates only the reviewed branch and refuses stale branch snapshots', async (t) => {
+  const requests = [];
+  const baseSha = 'e'.repeat(40);
+  const baseTreeSha = 'f'.repeat(40);
+  const changedTreeSha = '1'.repeat(40);
+  const commitSha = '2'.repeat(40);
+  const fetchImpl = async (url, options = {}) => {
+    const parsed = new URL(url);
+    const method = options.method || 'GET';
+    const body = options.body ? JSON.parse(String(options.body)) : {};
+    requests.push({ url: parsed, method, body });
+    if (parsed.hostname !== 'api.github.com') return response({ message: 'Unexpected host' }, 404);
+    if (method === 'GET' && parsed.pathname === '/repos/octo-org/private-repo') return response({ archived: false });
+    if (method === 'GET' && parsed.pathname === '/repos/octo-org/private-repo/branches/main') {
+      return response({ commit: { sha: baseSha, commit: { tree: { sha: baseTreeSha } } } });
+    }
+    if (method === 'POST' && parsed.pathname === '/repos/octo-org/private-repo/git/blobs') return response({ sha: 'blob' }, 201);
+    if (method === 'POST' && parsed.pathname === '/repos/octo-org/private-repo/git/trees') return response({ sha: changedTreeSha }, 201);
+    if (method === 'POST' && parsed.pathname === '/repos/octo-org/private-repo/git/commits') return response({ sha: commitSha, html_url: 'https://github.com/octo-org/private-repo/commit/2' }, 201);
+    if (method === 'PATCH' && parsed.pathname === '/repos/octo-org/private-repo/git/refs/heads/main') {
+      assert.equal(body.sha, commitSha);
+      assert.equal(body.force, false);
+      return response({ ref: 'refs/heads/main' });
+    }
+    return response({ message: 'Unexpected GitHub request' }, 404);
+  };
+  const { server, base } = await startApp(fetchImpl);
+  t.after(() => new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())));
+  const session = { token: 'ghu-publish-token', login: 'octocat', issuedAt: Date.now(), expiresAt: Date.now() + 60 * 60_000 };
+  const cookie = `aiflux_github_session=${encodeURIComponent(sealSession(session, env.GITHUB_SESSION_SECRET))}`;
+  const headers = { Cookie: cookie, 'Content-Type': 'application/json', Origin: base };
+  const payload = {
+    fullName: 'octo-org/private-repo', mode: 'push', baseBranch: 'main', targetBranch: 'main', expectedBaseSha: baseSha,
+    commitMessage: 'Fix the editor', files: [{ path: 'src/editor.ts', content: 'export const fixed = true;\n' }],
+  };
+  const pushed = await fetch(`${base}/api/github/changes`, { method: 'POST', headers, body: JSON.stringify(payload) });
+  assert.equal(pushed.status, 201);
+  assert.equal((await pushed.json()).mode, 'push');
+  assert.ok(requests.some((request) => request.method === 'PATCH'));
+  assert.ok(!requests.some((request) => request.url.pathname.endsWith('/git/refs')));
+
+  requests.length = 0;
+  const stale = await fetch(`${base}/api/github/changes`, {
+    method: 'POST', headers, body: JSON.stringify({ ...payload, expectedBaseSha: '0'.repeat(40) }),
+  });
+  assert.equal(stale.status, 409);
+  assert.match((await stale.json()).error, /branch changed after your review/);
+  assert.deepEqual(requests.map((request) => request.method), ['GET', 'GET']);
 });

@@ -5,6 +5,8 @@ import configHandler from '../api/config.js';
 import chatHandler from '../api/chat.js';
 import githubHandler from '../api/github.js';
 import githubReposHandler from '../api/github/repos.js';
+import githubBranchesHandler from '../api/github/branches.js';
+import githubChangesHandler from '../api/github/changes.js';
 import discoverModelsHandler from '../api/models/discover.js';
 
 // Exercise the same entrypoints Vercel invokes, without relying on Vercel credentials.
@@ -14,6 +16,8 @@ test('Vercel functions route to the shared API instead of returning SPA HTML', a
     if (req.url?.startsWith('/api/models/discover')) return discoverModelsHandler(req, res);
     if (req.url?.startsWith('/api/chat')) return chatHandler(req, res);
     if (req.url?.startsWith('/api/github/repos')) return githubReposHandler(req, res);
+    if (req.url?.startsWith('/api/github/branches')) return githubBranchesHandler(req, res);
+    if (req.url?.startsWith('/api/github/changes')) return githubChangesHandler(req, res);
     if (req.url?.startsWith('/api/github')) return githubHandler(req, res);
     res.writeHead(404).end();
   });
@@ -37,6 +41,12 @@ test('Vercel functions route to the shared API instead of returning SPA HTML', a
     assert.equal(typeof (await github.json()).configured, 'boolean');
     const githubRepos = await fetch(`${base}/api/github/repos`);
     assert.equal(githubRepos.status, 401);
+    const githubBranches = await fetch(`${base}/api/github/branches?full_name=octo-org%2Frepo`);
+    assert.equal(githubBranches.status, 401);
+    const githubChanges = await fetch(`${base}/api/github/changes`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}),
+    });
+    assert.equal(githubChanges.status, 403);
     const denied = await fetch(`${base}/api/chat`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ provider: 'openrouter', model: 'openai/paid', messages: [{ role: 'user', content: 'hi' }] }),

@@ -13,6 +13,7 @@ import Canvas from './components/Canvas';
 import ModelLibrary from './components/ModelLibrary';
 import SettingsModal from './components/SettingsModal';
 import GitHubContextModal from './components/GitHubContextModal';
+import GitHubPublishModal from './components/GitHubPublishModal';
 
 const emptyConfig: AppConfig = { configured: { openrouter: false, xkiro: false, gemini: false, groq: false }, ollamaConfigured: false, searchConfigured: false, requiresAccessCode: false };
 type DiscoverableProvider = 'gemini' | 'groq';
@@ -39,6 +40,7 @@ export default function App() {
   const [sending, setSending] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [githubOpen, setGithubOpen] = useState(false);
+  const [githubPublishOpen, setGithubPublishOpen] = useState(false);
   const [settingsProvider, setSettingsProvider] = useState<Provider | undefined>();
   const [contextFile, setContextFile] = useState<AttachedFile | null>(null);
   const [canvasVisible, setCanvasVisible] = useState(true);
@@ -159,7 +161,7 @@ export default function App() {
     if (!result) return;
     url.searchParams.delete('github');
     window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
-    if (result === 'connected') { setGithubOpen(true); notify('GitHub connected. Choose a repository to add read-only context.'); }
+    if (result === 'connected') { setGithubOpen(true); notify('GitHub connected. Browse context or publish reviewed Canvas files.'); }
     else if (result === 'cancelled') notify('GitHub sign-in was cancelled.');
   }, [notify]);
   useEffect(() => {
@@ -465,10 +467,11 @@ export default function App() {
         onNotify={notify} onSettings={() => openSettings()} onGitHub={() => setGithubOpen(true)} />
         : <ModelLibrary models={models} selected={selectedModel} catalogAvailable={freeCatalogAvailable} isConnected={isConnected} onSelect={chooseModel} onSettings={openSettings} onRefresh={() => void loadModels(true)} />}
     </main>
-    {(canvasVisible || mobileCanvasOpen) && <Canvas conversation={activeChat} mobileOpen={mobileCanvasOpen} onClose={closeCanvas} onSelectFile={selectFile} onUpdateFile={updateFile} onCreateFile={createFile} onDeleteFile={deleteFile} onAddContext={addContext} onNotify={notify} />}
+    {(canvasVisible || mobileCanvasOpen) && <Canvas conversation={activeChat} mobileOpen={mobileCanvasOpen} onClose={closeCanvas} onSelectFile={selectFile} onUpdateFile={updateFile} onCreateFile={createFile} onDeleteFile={deleteFile} onAddContext={addContext} onNotify={notify} onPublishGitHub={() => setGithubPublishOpen(true)} />}
     {mobileCanvasOpen && <button className="canvas-mobile-scrim" aria-label="Close Canvas" onClick={() => setMobileCanvasOpen(false)} />}
     {settingsOpen && <SettingsModal credentials={credentials} config={config} focusProvider={settingsProvider} onSave={saveSettings} onClose={() => setSettingsOpen(false)} />}
     {githubOpen && <GitHubContextModal onClose={() => setGithubOpen(false)} onUseContext={(file) => { setContextFile(file); setGithubOpen(false); notify(`${file.name} added as context for your next message.`); }} onNotify={notify} />}
+    {githubPublishOpen && <GitHubPublishModal files={activeChat.files} onClose={() => setGithubPublishOpen(false)} onNotify={notify} onConnect={() => { setGithubPublishOpen(false); setGithubOpen(true); }} />}
     {toast && <div className="toast" role="status"><span><Check size={15} /></span>{toast}</div>}
   </div>;
 }
