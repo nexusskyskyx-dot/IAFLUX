@@ -19,19 +19,30 @@ export class RequestError extends Error {
   }
 }
 
-export function validateChat(body, ollamaConfigured = false) {
+export function validateChat(body, ollamaConfigured = false, aifluxResolver) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     throw new RequestError(400, 'Invalid request.');
   }
-  const { provider, model, messages, searchMode = 'off' } = body;
+  let { provider, model, messages, searchMode = 'off' } = body;
   if (!['off', 'auto', 'always'].includes(searchMode)) {
     throw new RequestError(400, 'Choose a valid web search mode.');
   }
-  if (!['openrouter', 'gemini', 'groq', 'ollama'].includes(provider)) {
+  if (!['openrouter', 'gemini', 'groq', 'ollama', 'aiflux'].includes(provider)) {
     throw new RequestError(400, 'Choose a supported provider.');
   }
   if (typeof model !== 'string' || model.length > 180) {
     throw new RequestError(400, 'Choose a valid model.');
+  }
+  // Resolve AIFLUX family requests to a concrete underlying provider+model
+  // before running per-provider validation. The caller (api-app) supplies a
+  // resolver closure that checks which keys are actually available.
+  let aifluxRoute = null;
+  if (provider === 'aiflux') {
+    if (typeof aifluxResolver !== 'function') throw new RequestError(500, 'AIFLUX routing unavailable.');
+    aifluxRoute = aifluxResolver(model);
+    provider = aifluxRoute.provider;
+    model = aifluxRoute.model;
+    if (aifluxRoute.forceSearch && searchMode === 'off') searchMode = 'auto';
   }
   if (provider === 'openrouter' && model === 'openrouter/free') {
     throw new RequestError(400, 'The random free router can select safety classifiers. Choose a specific free coding model instead.');
@@ -62,7 +73,10 @@ export function validateChat(body, ollamaConfigured = false) {
   if (totalLength > 180_000 || cleanMessages.at(-1).role !== 'user') {
     throw new RequestError(400, 'Conversation is too long or does not end with a user message. Start a new chat or shorten the context.');
   }
-  return { provider, model, messages: cleanMessages, searchMode };
+  return {
+    provider, model, messages: cleanMessages, searchMode,
+    ...(aifluxRoute ? { aifluxRoute } : {}),
+  };
 }
 
 export function buildRequest({ provider, model, messages, searchMode = 'off', searchPerformed = false, systemPrompt }, key, ollamaBaseUrl) {

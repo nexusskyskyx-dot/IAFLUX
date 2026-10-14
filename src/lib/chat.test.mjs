@@ -5,7 +5,7 @@ import { requestChat } from './chat.ts';
 const args = (events, extras = {}) => ({
   provider: 'gemini', model: 'gemini-2.5-flash',
   messages: [{ role: 'user', content: 'What is new this week?' }],
-  key: 'model-key', searchKey: 'search-key', searchMode: 'always', accessCode: 'workspace-code',
+  keys: { openrouter: 'or-key', gemini: 'model-key', groq: 'groq-key' }, searchKey: 'search-key', searchMode: 'always', accessCode: 'workspace-code',
   signal: new AbortController().signal, onEvent: (event) => events.push(event), ...extras,
 });
 const frame = (event) => `data: ${JSON.stringify(event)}\n\n`;
@@ -31,7 +31,7 @@ test('client forwards web preference and optional search key, then reads interle
   try {
     await requestChat(args(events));
     assert.equal(sent.url, '/api/chat');
-    assert.equal(sent.options.headers['x-aiflux-key'], 'model-key');
+    assert.deepEqual(JSON.parse(decodeURIComponent(sent.options.headers['x-aiflux-keys'])), { openrouter: 'or-key', gemini: 'model-key', groq: 'groq-key' });
     assert.equal(sent.options.headers['x-aiflux-search-key'], 'search-key');
     assert.equal(sent.options.headers['x-aiflux-access-code'], 'workspace-code');
     assert.equal(JSON.parse(sent.options.body).searchMode, 'always');

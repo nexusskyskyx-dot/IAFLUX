@@ -27,7 +27,7 @@ test('OpenRouter stream refuses classifier output while accepting a named chat m
   try {
     const post = () => fetchNetwork(`http://127.0.0.1:${server.address().port}/api/chat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-aiflux-key': 'test-key', ...(process.env.AIFLUX_ACCESS_CODE ? { 'x-aiflux-access-code': process.env.AIFLUX_ACCESS_CODE } : {}) },
+      headers: { 'Content-Type': 'application/json', 'x-aiflux-keys': encodeURIComponent(JSON.stringify({ openrouter: 'test-key', gemini: '', groq: '' })), ...(process.env.AIFLUX_ACCESS_CODE ? { 'x-aiflux-access-code': process.env.AIFLUX_ACCESS_CODE } : {}) },
       body: JSON.stringify(payload),
     });
     const rejected = await post();

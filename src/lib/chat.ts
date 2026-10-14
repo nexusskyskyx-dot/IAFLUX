@@ -11,7 +11,7 @@ export async function requestChat(input: {
   provider: Provider;
   model: string;
   messages: { role: 'user' | 'assistant'; content: string }[];
-  key: string;
+  keys: Record<'openrouter' | 'gemini' | 'groq', string>;
   searchKey: string;
   searchMode: SearchMode;
   accessCode: string;
@@ -22,7 +22,7 @@ export async function requestChat(input: {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      ...(input.key ? { 'x-aiflux-key': input.key } : {}),
+      'x-aiflux-keys': encodeURIComponent(JSON.stringify(input.keys)),
       ...(input.searchMode !== 'off' && input.searchKey ? { 'x-aiflux-search-key': input.searchKey } : {}),
       ...(input.accessCode ? { 'x-aiflux-access-code': input.accessCode } : {}),
     },

@@ -170,7 +170,7 @@ export function workspaceContext(files: WorkspaceFile[]): string {
 // snapshot into the latest user message (or the final tool-result message) so
 // the model always sees up-to-date file state without re-reading the whole
 // conversation history.
-export function buildProviderMessages(messages: ChatMessage[], files: WorkspaceFile[]): { role: 'user' | 'assistant'; content: string }[] {
+export function buildProviderMessages(messages: ChatMessage[], files: WorkspaceFile[], _options: { includeFiles?: boolean } = {}): { role: 'user' | 'assistant'; content: string }[] {
   const base = toProviderMessages(messages);
   return injectWorkspaceSnapshot(base, files);
 }

@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
+import catalog from '../src/data/models.json' with { type: 'json' };
 import { isNonChatModelId } from '../src/lib/model-policy.mjs';
 import { timingSafeEqual } from 'node:crypto';
 import {
@@ -7,6 +8,8 @@ import {
   readSSE, readLines, extractChunk, getFreeOpenRouterModels,
 } from './providers.mjs';
 import { planWebSearch, searchWeb, withSearchContext } from './search.mjs';
+import { listAIFluxModels, memberInfo, resolveAIFluxRoute } from './aiflux-family.mjs';
+import { buildAssistantPrompt } from './assistant-profile.mjs';
 
 const app = express();
 const ollamaBaseUrl = process.env.OLLAMA_BASE_URL?.trim() || '';
@@ -37,10 +40,13 @@ app.get('/api/config', (_req, res) => {
     ollamaConfigured: Boolean(ollamaBaseUrl),
     searchConfigured: Boolean(envSearchKey),
     requiresAccessCode: Boolean(accessCode),
+    aifluxAvailable: Object.values(envKeys).some((k) => Boolean(k)),
   });
 });
 
-let catalogCache = { at: 0, models: [] };
+// Seed cache with the curated static catalog so that /api/models always returns
+// a useful list even before the live OpenRouter fetch succeeds (sandbox/offline).
+let catalogCache = { at: 0, models: catalog };
 app.get('/api/models', async (_req, res) => {
   let models = catalogCache.models;
   let catalogAvailable = true;
@@ -53,6 +59,10 @@ app.get('/api/models', async (_req, res) => {
       models = catalogCache.models;
     }
   }
+  // Always present the AIFLUX family models at the TOP of the catalog, before
+  // provider-specific entries. These are routed server-side to the best
+  // available free model for each persona.
+  const aifluxModels = listAIFluxModels().map(({ _meta, ...rest }) => rest);
   let ollamaModels = [];
   if (ollamaBaseUrl) {
     try {
@@ -67,7 +77,7 @@ app.get('/api/models', async (_req, res) => {
       }
     } catch { /* Ollama may not be running yet. */ }
   }
-  res.json({ models, ollamaModels, catalogAvailable });
+  res.json({ models: [...aifluxModels, ...models], ollamaModels, catalogAvailable });
 });
 
 const limits = new Map();
@@ -121,13 +131,37 @@ app.post('/api/chat', rateLimit, async (req, res) => {
     if (!correctAccessCode(req.get('x-aiflux-access-code'))) {
       throw new RequestError(403, 'Enter the workspace access code in Settings to continue.');
     }
-    const input = validateChat(req.body, Boolean(ollamaBaseUrl));
-    const suppliedKey = req.get('x-aiflux-key')?.trim() || '';
-    const suppliedSearchKey = req.get('x-aiflux-search-key')?.trim() || '';
-    if (suppliedKey.length > 512 || suppliedSearchKey.length > 512) throw new RequestError(400, 'Invalid API key.');
-    const key = suppliedKey || envKeys[input.provider] || '';
+    const searchHeader = req.get('x-aiflux-search-key')?.trim() || '';
+    const keysHeader = req.get('x-aiflux-keys') || '';
+    let userKeys = { openrouter: '', gemini: '', groq: '' };
+    try {
+      if (keysHeader) {
+        const parsed = JSON.parse(decodeURIComponent(keysHeader));
+        if (parsed && typeof parsed === 'object') {
+          userKeys = {
+            openrouter: typeof parsed.openrouter === 'string' ? parsed.openrouter.slice(0, 512) : '',
+            gemini: typeof parsed.gemini === 'string' ? parsed.gemini.slice(0, 512) : '',
+            groq: typeof parsed.groq === 'string' ? parsed.groq.slice(0, 512) : '',
+          };
+        }
+      }
+    } catch {
+      throw new RequestError(400, 'Invalid API key header.');
+    }
+    if (searchHeader.length > 512) throw new RequestError(400, 'Invalid API key.');
+    const input = validateChat(req.body, Boolean(ollamaBaseUrl), (memberId) => {
+      return resolveAIFluxRoute(memberId, userKeys, envKeys, Boolean(ollamaBaseUrl));
+    });
+    const suppliedSearchKey = searchHeader;
+    const selectedProvider = input.provider;
+    const key = (userKeys[selectedProvider] || envKeys[selectedProvider] || '');
+    // AIFLUX persona system prompt: append the member addendum onto the base
+    // AIFLUX identity prompt, and force searchMode=auto for Toki.
+    const personaSystemPrompt = input.aifluxRoute
+      ? buildAssistantPrompt({ provider: input.provider, model: input.model, searchMode: input.searchMode }) + `\n\n${input.aifluxRoute.memberAddendum}`
+      : undefined;
     // Check the model connection before making any search calls.
-    let { url, options, format } = buildRequest(input, key, ollamaBaseUrl);
+    let { url, options, format } = buildRequest({ ...input, systemPrompt: personaSystemPrompt }, key, ollamaBaseUrl);
     timeout = setTimeout(() => controller.abort(new Error('timeout')), 120_000);
     if (input.searchMode !== 'off') {
       startStream(res, input.model);

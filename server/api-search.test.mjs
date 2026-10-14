@@ -22,7 +22,11 @@ async function withServer(mockUpstream, run) {
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   globalThis.fetch = mockUpstream;
   const post = (data, headers = {}) => nativeFetch(`http://127.0.0.1:${server.address().port}/api/chat`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-aiflux-key': 'my-gemini-key', ...headers }, body: JSON.stringify(data),
+    method: 'POST', headers: {
+      'Content-Type': 'application/json',
+      'x-aiflux-keys': encodeURIComponent(JSON.stringify({ gemini: 'my-gemini-key', openrouter: 'my-or-key', groq: 'my-groq-key' })),
+      ...headers,
+    }, body: JSON.stringify(data),
   });
   try { await run(post); }
   finally {

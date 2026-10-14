@@ -14,7 +14,7 @@ import Canvas from './components/Canvas';
 import ModelLibrary from './components/ModelLibrary';
 import SettingsModal from './components/SettingsModal';
 
-const emptyConfig: AppConfig = { configured: { openrouter: false, gemini: false, groq: false }, ollamaConfigured: false, searchConfigured: false, requiresAccessCode: false };
+const emptyConfig: AppConfig = { configured: { openrouter: false, gemini: false, groq: false }, ollamaConfigured: false, searchConfigured: false, requiresAccessCode: false, aifluxAvailable: false };
 
 export default function App() {
   const [initial] = useState(() => ({ chats: loadConversations(), activeId: loadActiveId() }));
@@ -111,9 +111,10 @@ export default function App() {
 
   const isConnected = useCallback((provider: Provider) => {
     if (provider === 'ollama') return config.ollamaConfigured && ollamaModels.length > 0;
+    if (provider === 'aiflux') return config.aifluxAvailable || (['openrouter', 'gemini', 'groq'] as const).some((p) => Boolean(credentials.keys[p] || config.configured[p]));
     return Boolean(credentials.keys[provider] || config.configured[provider]);
   }, [config, credentials, ollamaModels]);
-  const anyConnected = (['openrouter', 'gemini', 'groq', 'ollama'] as Provider[]).some(isConnected);
+  const anyConnected = (['aiflux', 'openrouter', 'gemini', 'groq', 'ollama'] as Provider[]).some(isConnected);
 
   useEffect(() => { void loadModels(); }, [loadModels]);
   useEffect(() => {
@@ -199,7 +200,9 @@ export default function App() {
     const initialFiles = activeChat.files;
     const userMessage: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: text, createdAt: now, attachments };
     const assistantId = crypto.randomUUID();
-    const assistantMessage: ChatMessage = { id: assistantId, role: 'assistant', content: '', createdAt: now, status: 'streaming', model: selectedModel.name, toolCalls: [], ...(searchMode !== 'off' ? { searchStatus: 'planning' } : {}) };
+    const forcedSearch = selectedModel.provider === 'aiflux' && selectedModel.id === 'toki';
+    const effectiveSearchMode: SearchMode = forcedSearch && searchMode === 'off' ? 'auto' : searchMode;
+    const assistantMessage: ChatMessage = { id: assistantId, role: 'assistant', content: '', createdAt: now, status: 'streaming', model: selectedModel.name, toolCalls: [], ...(effectiveSearchMode !== 'off' ? { searchStatus: 'planning' } : {}) };
     const firstPassHistory = buildProviderMessages([...activeChat.messages, userMessage], initialFiles);
     if (firstPassHistory.reduce((sum, message) => sum + message.content.length, 0) > 180_000) { notify('This message is too long. Remove an attachment or shorten it.'); return false; }
     const updated: Conversation = {
@@ -228,11 +231,11 @@ export default function App() {
           provider: selectedModel.provider,
           model: selectedModel.id,
           messages: params.messages,
-          key: selectedModel.provider !== 'ollama' ? credentials.keys[selectedModel.provider] : '',
+          keys: credentials.keys,
           searchKey: credentials.searchKey,
           // Only run web search on the FIRST assistant turn of a user message;
           // subsequent tool-loop turns should not re-trigger web searches.
-          searchMode: params.roundsLeft === MAX_TOOL_ROUNDS ? searchMode : 'off',
+          searchMode: params.roundsLeft === MAX_TOOL_ROUNDS ? effectiveSearchMode : 'off',
           accessCode: credentials.accessCode,
           signal: controller.signal,
           onEvent: (event) => {

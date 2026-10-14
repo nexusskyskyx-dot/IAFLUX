@@ -1,4 +1,5 @@
-export type Provider = 'openrouter' | 'gemini' | 'groq' | 'ollama';
+export type Provider = 'openrouter' | 'gemini' | 'groq' | 'ollama' | 'aiflux';
+export type AIFluxMember = 'siku' | 'hiku' | 'ziker' | 'toki' | 'zuki';
 export type SearchMode = 'off' | 'auto' | 'always';
 
 export interface WebSource {
@@ -61,6 +62,7 @@ export interface AppConfig {
   ollamaConfigured: boolean;
   searchConfigured: boolean;
   requiresAccessCode: boolean;
+  aifluxAvailable: boolean;
 }
 
 export interface Credentials {
