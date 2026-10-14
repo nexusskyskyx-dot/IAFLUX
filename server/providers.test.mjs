@@ -76,7 +76,7 @@ test('catalog favors curated coding models and excludes safety/utility endpoints
     { id: 'openrouter/free', name: 'Random router' },
     { id: 'openai/gpt-5', name: 'Paid' },
   ] }) }));
-  assert.deepEqual(models.map((model) => model.id), ['poolside/laguna-s-2.1:free', 'qwen/coder:free', 'liquid/lfm-2.5-2.6b:free']);
+  assert.deepEqual(models.map((model) => model.id), ['qwen/coder:free', 'poolside/laguna-s-2.1:free', 'liquid/lfm-2.5-2.6b:free']);
   assert.equal(models[0].strength, 'Coding focused');
   assert.equal(models[2].strength, 'OpenRouter free');
   assert.doesNotMatch(friendlyUpstreamError(401, '{"error":{"message":"bad secret"}}', 'secret'), /secret/);
