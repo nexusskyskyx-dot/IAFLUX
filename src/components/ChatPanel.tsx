@@ -5,6 +5,7 @@ import remarkGfm from 'remark-gfm';
 import type { AttachedFile, ChatMessage, Conversation, ModelInfo, Provider, SearchMode } from '../types';
 import { FluxMark, ProviderIcon } from './Brand';
 import ModelPicker from './ModelPicker';
+import { copyToClipboard } from '../lib/clipboard.ts';
 
 interface Props {
   conversation: Conversation;
@@ -35,8 +36,9 @@ const suggestions = [
   { icon: <Code2 size={20} strokeWidth={1.7} />, color: 'orange', title: 'Learn something new', desc: 'Understand it by building it', prompt: 'Explain React hooks using a small, practical example I can edit and run. Walk me through how it works.' },
 ];
 
-function copyText(text: string, onNotify: (message: string) => void) {
-  navigator.clipboard.writeText(text).then(() => onNotify('Copied to clipboard')).catch(() => onNotify('Could not copy to clipboard'));
+async function copyText(text: string, onNotify: (message: string) => void) {
+  const copied = await copyToClipboard(text);
+  onNotify(copied ? 'Copied to clipboard' : 'Could not copy to clipboard');
 }
 
 function CodeBlock({ node, onOpenSnippet, onNotify }: { node: unknown; onOpenSnippet: Props['onOpenSnippet']; onNotify: Props['onNotify'] }) {
@@ -124,7 +126,11 @@ export default function ChatPanel(props: Props) {
     textRef.current?.focus();
   };
   const copyMessage = (message: ChatMessage) => {
-    navigator.clipboard.writeText(message.content).then(() => { setCopiedId(message.id); window.setTimeout(() => setCopiedId(null), 1800); }).catch(() => props.onNotify('Could not copy to clipboard'));
+    void copyToClipboard(message.content).then((copied) => {
+      if (!copied) { props.onNotify('Could not copy to clipboard'); return; }
+      setCopiedId(message.id);
+      window.setTimeout(() => setCopiedId(null), 1800);
+    });
   };
   const nextSearchMode = { off: 'Auto', auto: 'Always', always: 'Off' }[props.searchMode];
 

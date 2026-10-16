@@ -1,4 +1,5 @@
 import type { ChatMessage, Conversation, WorkspaceFile } from '../types';
+import { newId } from './id.ts';
 
 export const STARTER_CODE = `<!DOCTYPE html>
 <html lang="en">
@@ -33,9 +34,9 @@ export const STARTER_CODE = `<!DOCTYPE html>
 </html>`;
 
 export function createDraft(): Conversation {
-  const file: WorkspaceFile = { id: crypto.randomUUID(), name: 'index.html', content: STARTER_CODE, origin: 'starter' };
+  const file: WorkspaceFile = { id: newId(), name: 'index.html', content: STARTER_CODE, origin: 'starter' };
   return {
-    id: crypto.randomUUID(), title: 'New conversation',
+    id: newId(), title: 'New conversation',
     createdAt: Date.now(), updatedAt: Date.now(), messages: [],
     files: [file], selectedFileId: file.id,
   };
@@ -98,7 +99,7 @@ export function extractCodeFiles(markdown: string, existing: WorkspaceFile[]): W
       while ([...existing, ...found].some((file) => file.name === `${base}-${version}${extension}`)) version++;
       name = `${base}-${version}${extension}`;
     }
-    found.push({ id: crypto.randomUUID(), name, content, origin: 'generated' });
+    found.push({ id: newId(), name, content, origin: 'generated' });
   }
   return found;
 }
@@ -127,8 +128,10 @@ export function buildPreview(files: WorkspaceFile[]): string | null {
   else document = document.replace(/<html\b[^>]*>/i, (opening) => `${opening}<head>${meta}</head>`);
   const css = files.filter((file) => /\.css$/i.test(file.name)).map((file) => file.content.replace(/<\/style/gi, '<\\/style')).join('\n');
   const js = files.filter((file) => /\.js$/i.test(file.name)).map((file) => file.content.replace(/<\/script/gi, '<\\/script')).join('\n');
-  if (css) document = document.replace(/<\/head>/i, `<style>${css}</style></head>`);
-  if (js) document = document.replace(/<\/body>/i, `<script>${js}</script></body>`);
+  // Pass a replacer function: CSS/JS containing `$&` or `$1` would otherwise be
+  // treated as replacement patterns and corrupted.
+  if (css) document = document.replace(/<\/head>/i, () => `<style>${css}</style></head>`);
+  if (js) document = document.replace(/<\/body>/i, () => `<script>${js}</script></body>`);
   return document;
 }
 

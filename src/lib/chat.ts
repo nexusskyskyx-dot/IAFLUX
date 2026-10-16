@@ -30,8 +30,18 @@ export async function requestChat(input: {
     signal: input.signal,
   });
   if (!response.ok) {
-    const json = await response.json().catch(() => ({}));
-    throw new Error(typeof json.error === 'string' ? json.error : `Request failed (${response.status}).`);
+    // A gateway timeout returns an HTML error page, not our JSON envelope.
+    const json = (response.headers.get('content-type') || '').includes('application/json')
+      ? await response.json().catch(() => null)
+      : null;
+    const detail = json && typeof json.error === 'string' ? json.error : '';
+    if (response.status === 504) {
+      throw new Error(detail || 'The server ran out of time before the answer finished. Try a shorter request, or host AIFLUX somewhere with a longer request limit.');
+    }
+    if (response.status === 502 || response.status === 503) {
+      throw new Error(detail || 'The server could not complete this request. Check the deployment logs and try again.');
+    }
+    throw new Error(detail || `Request failed (${response.status}).`);
   }
   if (!response.body) throw new Error('The provider did not return a response.');
   const reader = response.body.getReader();
@@ -60,7 +70,7 @@ export async function requestChat(input: {
         }
       }
     }
-    if (!finished && !input.signal.aborted) throw new Error('The connection closed before the answer finished.');
+    if (!finished && !input.signal.aborted) throw new Error('The answer was cut off before it finished. A hosted deployment may have hit its request time limit — try a shorter request.');
   } finally {
     reader.releaseLock();
   }

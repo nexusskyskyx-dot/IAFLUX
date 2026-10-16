@@ -70,18 +70,23 @@ GROQ_API_KEY=
 TAVILY_API_KEY=
 OLLAMA_BASE_URL=
 AIFLUX_ACCESS_CODE=
+AIFLUX_REQUEST_TIMEOUT_MS=
 PORT=3000
 ```
 
 - User-provided keys take precedence over server keys for that request. The browser sends the selected AI key (and, if search is enabled, an optional Tavily key) to the AIFLUX server; the server forwards each only to its respective provider over HTTPS. Keys are not written to server storage or logs by AIFLUX.
 - If deploying with **shared server-side keys**, including `TAVILY_API_KEY`, set `AIFLUX_ACCESS_CODE` at a minimum. Visitors must enter it in Settings before sending requests. This is a **shared gate**, not user accounts or a replacement for a proper auth gateway. Protect public instances with authentication and usage controls.
-- The server only calls fixed AI provider/Tavily URLs or the operator-configured Ollama URL. OpenRouter requests must target a specific `:free` chat model; the random router, known safety/utility model IDs, and paid variants are rejected even when requested directly via the API. The server applies basic per-IP limits (60 chat requests and 12 search-enabled requests per 10 minutes per running instance) and a two-minute request timeout. Serverless instances may each have their own counters, and host-level timeouts can be shorter; these controls are not a substitute for authentication.
+- The server only calls fixed AI provider/Tavily URLs or the operator-configured Ollama URL. OpenRouter requests must target a specific `:free` chat model; the random router, known safety/utility model IDs, and paid variants are rejected even when requested directly via the API. The server applies basic per-IP limits (60 chat requests and 12 search-enabled requests per 10 minutes per running instance) and a request timeout. Serverless instances may each have their own counters, and host-level timeouts can be shorter; these controls are not a substitute for authentication.
+- **Request budget:** `AIFLUX_REQUEST_TIMEOUT_MS` caps how long one answer may take. It defaults to **120 s self-hosted** and **55 s on Vercel**, so the server answers with a clear message instead of letting the platform kill the function mid-stream. Lower it if your host ends requests sooner.
+- **Behind a proxy, AIFLUX trusts it.** On Vercel (or with `AIFLUX_TRUST_PROXY=1`) the app enables Express `trust proxy` so per-IP rate limiting keys on the visitor from `X-Forwarded-For` rather than the proxy's socket address. Enable it only when a proxy you control actually terminates the connection, otherwise visitors can spoof the header to get their own bucket.
 - Run behind HTTPS in production. Browser storage is not an encrypted vault; avoid “Remember on this device” on shared computers. Review your provider's data-handling policy before sending private code.
 - AIFLUX is a browser-based AI coding **workspace**, not an autonomous repository agent. It doesn't execute shell commands, install packages, or edit files on the server on a user's behalf.
 
 ### Deploy on Vercel
 
 This repository includes `vercel.json` for the Vite frontend and `api/*.js` Vercel Functions for the chat, config, and model-catalog endpoints. When the repository is linked to Vercel, pushing a branch creates a **preview deployment**; production deploys from the Vercel project's production branch (usually `main`). No API key is required to build or view the UI, but live cloud chat needs a user key or a server key configured under **Vercel → Project Settings → Environment Variables**. Never commit a `.env` file.
+
+On Vercel, each answer is one serverless invocation, so it is bound by the plan's function duration. `vercel.json` sets `functions.maxDuration` to **60 s**, and the server stops itself at **55 s** with a readable message rather than being killed at the platform limit (a Hobby project that overrides `maxDuration` below that should lower `AIFLUX_REQUEST_TIMEOUT_MS` to match). Very long answers can still be cut off on the free tier; start a new chat or ask for a shorter reply if that happens.
 
 If you use a shared `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`, **or `TAVILY_API_KEY`** on Vercel, also set `AIFLUX_ACCESS_CODE` and put the app behind appropriate authentication before inviting public traffic. Without `TAVILY_API_KEY`, the chat function tries Tavily's rate-limited keyless API; visitors can supply their own key in Settings. `OLLAMA_BASE_URL=http://127.0.0.1:11434` works only when AIFLUX and Ollama run on the **same machine**; it will not reach your laptop from Vercel's cloud.
 
@@ -101,7 +106,7 @@ vercel.json          Vite build and SPA routing configuration
 
 ## Verified locally
 
-`npm test` covers the Vercel function entrypoints, provider request validation, free-only OpenRouter routing, rejection of random/safety/utility models, Gemini/Groq/Ollama request formats, the AIFLUX identity/capability profile on every provider and search path, AI tool planning, Tavily keyless/keyed calls and source sanitization, search/answer streaming, SSE parsing, error redaction, code-file extraction, and preview sandbox generation. External AI and Tavily requests are **mocked** in these tests; a real end-to-end search requires a working AI connection and Tavily availability. `npm run build` checks the TypeScript app and builds the production bundle.
+`npm test` covers the Vercel function entrypoints, provider request validation, free-only OpenRouter routing, rejection of random/safety/utility models, Gemini/Groq/Ollama request formats, the AIFLUX identity/capability profile on every provider and search path, AI tool planning, Tavily keyless/keyed calls and source sanitization, search/answer streaming, SSE parsing, error redaction, code-file extraction, preview sandbox generation, per-visitor rate limiting behind a proxy, the hosted request budget, and id/clipboard fallbacks for insecure (plain-HTTP) contexts. External AI and Tavily requests are **mocked** in these tests; a real end-to-end search requires a working AI connection and Tavily availability. `npm run build` checks the TypeScript app and builds the production bundle.
 
 ---
 

@@ -61,7 +61,7 @@ test('search failures and interrupted streams are surfaced rather than silently 
     await assert.rejects(requestChat(args(events)), /Search is unavailable/);
     assert.deepEqual(events.map((event) => event.type), ['search', 'error']);
     globalThis.fetch = async () => sse(frame({ type: 'start', model: 'gemini-2.5-flash' }));
-    await assert.rejects(requestChat(args([])), /connection closed before the answer finished/);
+    await assert.rejects(requestChat(args([])), /answer was cut off before it finished/);
     globalThis.fetch = async () => new Response(JSON.stringify({ error: 'Missing provider key.' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
     await assert.rejects(requestChat(args([])), /Missing provider key/);
   } finally { globalThis.fetch = originalFetch; }

@@ -4,6 +4,7 @@ import type { AppConfig, AttachedFile, ChatMessage, Conversation, Credentials, M
 import { CURATED_MODELS, DEFAULT_MODEL } from './lib/models';
 import { createDraft, downloadConversation, extractCodeFiles, mergeGeneratedFiles, toProviderMessages } from './lib/files';
 import { hasSavedModel, loadActiveId, loadConversations, loadCredentials, loadModel, loadSearchMode, saveActiveId, saveConversations, saveCredentials, saveModel, saveSearchMode } from './lib/storage';
+import { newId } from './lib/id.ts';
 import { isUsableFreeCatalogModel } from './lib/model-policy.mjs';
 import { requestChat } from './lib/chat';
 import { Brand } from './components/Brand';
@@ -81,16 +82,6 @@ export default function App() {
     window.addEventListener('pagehide', flush);
     return () => window.removeEventListener('pagehide', flush);
   }, []);
-  useEffect(() => {
-    const newChatShortcut = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === 'o') {
-        event.preventDefault(); newChat();
-      }
-    };
-    window.addEventListener('keydown', newChatShortcut);
-    return () => window.removeEventListener('keydown', newChatShortcut);
-  });
-
   const loadModels = useCallback(async (force = false) => {
     if (catalogLoading.current || (!force && catalogLoaded.current)) return;
     catalogLoading.current = true;
@@ -160,10 +151,20 @@ export default function App() {
     if (next === 'library') void loadModels();
   };
   const stop = () => { abortRef.current?.controller.abort(); };
-  const newChat = () => {
+  const newChat = useCallback(() => {
     stop(); setActiveId(null); setDraftChat(createDraft()); setContextFile(null);
     setView('studio'); setMobileSidebarOpen(false); setMobileCanvasOpen(false);
-  };
+  }, []);
+
+  useEffect(() => {
+    const newChatShortcut = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === 'o') {
+        event.preventDefault(); newChat();
+      }
+    };
+    window.addEventListener('keydown', newChatShortcut);
+    return () => window.removeEventListener('keydown', newChatShortcut);
+  }, [newChat]);
   const selectChat = (id: string) => {
     if (activeId !== id) stop();
     setActiveId(id); setContextFile(null); setView('studio'); setMobileSidebarOpen(false); setMobileCanvasOpen(false);
@@ -195,8 +196,8 @@ export default function App() {
     if (config.requiresAccessCode && !credentials.accessCode) { openSettings(); notify('Enter your workspace access code first.'); return false; }
     const now = Date.now();
     const chatId = activeChat.id;
-    const userMessage: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: text, createdAt: now, attachments };
-    const assistantId = crypto.randomUUID();
+    const userMessage: ChatMessage = { id: newId(), role: 'user', content: text, createdAt: now, attachments };
+    const assistantId = newId();
     const assistantMessage: ChatMessage = { id: assistantId, role: 'assistant', content: '', createdAt: now, status: 'streaming', model: selectedModel.name, ...(searchMode !== 'off' ? { searchStatus: 'planning' } : {}) };
     const history = toProviderMessages([...activeChat.messages, userMessage]);
     if (history.reduce((sum, message) => sum + message.content.length, 0) > 180_000) { notify('This message is too long. Remove an attachment or shorten it.'); return false; }
@@ -271,7 +272,7 @@ export default function App() {
   const selectFile = (id: string) => updateActive((chat) => ({ ...chat, selectedFileId: id }));
   const updateFile = (id: string, content: string) => updateActive((chat) => ({ ...chat, updatedAt: Date.now(), files: chat.files.map((file) => file.id === id ? { ...file, content, origin: 'user' } : file) }));
   const createFile = (name: string, content = '') => {
-    const file: WorkspaceFile = { id: crypto.randomUUID(), name, content, origin: 'user' };
+    const file: WorkspaceFile = { id: newId(), name, content, origin: 'user' };
     updateActive((chat) => ({ ...chat, updatedAt: Date.now(), files: [...chat.files, file], selectedFileId: file.id }));
     notify(`${name} added to Canvas`);
   };

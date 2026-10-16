@@ -18,6 +18,25 @@ const envKeys = {
   groq: process.env.GROQ_API_KEY || '',
 };
 
+// Vercel (and any reverse proxy) terminates TLS and forwards the request, so the
+// socket address is the proxy's — not the visitor's. Without trusting the proxy
+// every visitor collapses into a single rate-limit bucket and one person's
+// traffic locks out the whole deployment.
+const trustProxy = Boolean(process.env.VERCEL) || process.env.AIFLUX_TRUST_PROXY === '1';
+if (trustProxy) app.set('trust proxy', true);
+
+// Vercel (Hobby) kills a function at its maxDuration — 10s by default, 60s once
+// `functions.maxDuration` is set. Self-hosted runs can afford longer. Finishing
+// just inside the platform budget turns a hard 504 into a readable message.
+const DEFAULT_TIMEOUT_MS = process.env.VERCEL ? 55_000 : 120_000;
+const REQUEST_TIMEOUT_MS = Math.max(5_000, Math.min(
+  Number(process.env.AIFLUX_REQUEST_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS,
+  600_000,
+));
+// Some proxies and CDNs buffer a response that is silent for too long. Idle
+// comment frames keep a slow first token or a search plan from looking dead.
+const KEEPALIVE_MS = 5_000;
+
 app.disable('x-powered-by');
 app.use((_req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -42,40 +61,57 @@ app.get('/api/config', (_req, res) => {
 
 let catalogCache = { at: 0, models: [] };
 app.get('/api/models', async (_req, res) => {
-  let models = catalogCache.models;
+  // Run discovery and the local Ollama lookup together: serially they can exceed
+  // a serverless function's execution budget.
+  const usedLiveDiscovery = Date.now() - catalogCache.at > 10 * 60 * 1000;
+  const [discovery, ollama] = await Promise.allSettled([
+    usedLiveDiscovery ? getFreeOpenRouterModels() : Promise.resolve(catalogCache.models),
+    ollamaBaseUrl ? fetchOllamaModels() : Promise.resolve([]),
+  ]);
   let catalogAvailable = true;
-  if (Date.now() - catalogCache.at > 10 * 60 * 1000) {
-    try {
-      models = await getFreeOpenRouterModels();
-      catalogCache = { at: Date.now(), models };
-    } catch {
-      catalogAvailable = false;
-      models = catalogCache.models;
-    }
+  let models = catalogCache.models;
+  if (discovery.status === 'fulfilled') {
+    models = discovery.value;
+    // Only stamp the cache when discovery actually ran; otherwise a busy
+    // workspace would refresh its TTL on every request and never see new models.
+    if (usedLiveDiscovery) catalogCache = { at: Date.now(), models };
+  } else {
+    catalogAvailable = false;
   }
-  let ollamaModels = [];
-  if (ollamaBaseUrl) {
-    try {
-      const response = await fetch(`${ollamaBaseUrl.replace(/\/+$/, '')}/api/tags`, { signal: AbortSignal.timeout(3000) });
-      if (response.ok) {
-        const data = await response.json();
-        ollamaModels = (data.models || []).filter((model) => typeof model.name === 'string' && !isNonChatModelId(model.name)).slice(0, 80).map((model) => ({
-          id: model.name, provider: 'ollama', name: model.name,
-          shortName: model.name, description: 'Runs privately on your Ollama server.',
-          strength: 'Local & private', badge: 'LOCAL',
-        }));
-      }
-    } catch { /* Ollama may not be running yet. */ }
-  }
-  res.json({ models, ollamaModels, catalogAvailable });
+  res.json({
+    models,
+    ollamaModels: ollama.status === 'fulfilled' ? ollama.value : [],
+    catalogAvailable,
+  });
 });
 
+async function fetchOllamaModels() {
+  const response = await fetch(`${ollamaBaseUrl.replace(/\/+$/, '')}/api/tags`, { signal: AbortSignal.timeout(3000) });
+  if (!response.ok) return [];
+  const data = await response.json();
+  return (data.models || [])
+    .filter((model) => typeof model.name === 'string' && !isNonChatModelId(model.name))
+    .slice(0, 80)
+    .map((model) => ({
+      id: model.name, provider: 'ollama', name: model.name,
+      shortName: model.name, description: 'Runs privately on your Ollama server.',
+      strength: 'Local & private', badge: 'LOCAL',
+    }));
+}
+
 const limits = new Map();
+/**
+ * The visitor identity used for rate limiting. Behind a proxy the socket address
+ * is the proxy's, so `trust proxy` must be on for `req.ip` to be the real client.
+ */
+function clientKey(req) {
+  return req.ip || req.get('x-real-ip') || req.socket?.remoteAddress || 'unknown';
+}
 function rateLimit(req, res, next) {
-  const address = req.ip || 'unknown';
+  const address = clientKey(req);
   const now = Date.now();
   const previous = limits.get(address);
-  const window = previous && now - previous.start < 10 * 60_000 ? previous : { start: now, count: 0 };
+  const window = previous && now - previous.start < 10 * 60_000 ? previous : { start: now, count: 0, searches: 0 };
   window.count += 1;
   limits.set(address, window);
   if (limits.size > 1000) {
@@ -101,6 +137,15 @@ function sendEvent(res, event) {
   if (!res.writableEnded && !res.destroyed) res.write(`data: ${JSON.stringify(event)}\n\n`);
 }
 
+/** SSE comment frames: ignored by clients, but they keep the connection warm. */
+function startKeepAlive(res) {
+  const timer = setInterval(() => {
+    if (!res.writableEnded && !res.destroyed) res.write(': keep-alive\n\n');
+  }, KEEPALIVE_MS);
+  timer.unref?.();
+  return () => clearInterval(timer);
+}
+
 function startStream(res, model) {
   if (res.headersSent) return;
   res.status(200).set({
@@ -114,8 +159,11 @@ function startStream(res, model) {
 }
 
 app.post('/api/chat', rateLimit, async (req, res) => {
-  let timeout;
   const controller = new AbortController();
+  let timedOut = false;
+  const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, REQUEST_TIMEOUT_MS);
+  timeout.unref?.();
+  let stopKeepAlive = null;
   res.on('close', () => { if (!res.writableEnded) controller.abort(); });
   try {
     if (!correctAccessCode(req.get('x-aiflux-access-code'))) {
@@ -128,9 +176,9 @@ app.post('/api/chat', rateLimit, async (req, res) => {
     const key = suppliedKey || envKeys[input.provider] || '';
     // Check the model connection before making any search calls.
     let { url, options, format } = buildRequest(input, key, ollamaBaseUrl);
-    timeout = setTimeout(() => controller.abort(new Error('timeout')), 120_000);
     if (input.searchMode !== 'off') {
       startStream(res, input.model);
+      stopKeepAlive = startKeepAlive(res);
       sendEvent(res, { type: 'search', phase: 'planning' });
       const query = await planWebSearch(input, key, ollamaBaseUrl, { signal: controller.signal });
       if (query) {
@@ -151,6 +199,7 @@ app.post('/api/chat', rateLimit, async (req, res) => {
     }
     if (!upstream.body) throw new RequestError(502, 'The provider returned an empty response.');
     startStream(res, input.model);
+    stopKeepAlive ??= startKeepAlive(res);
     let usedModel = input.model;
     let hasText = false;
     const chunks = format === 'ollama' ? readLines(upstream.body) : readSSE(upstream.body);
@@ -170,6 +219,7 @@ app.post('/api/chat', rateLimit, async (req, res) => {
         sendEvent(res, { type: 'model', model: usedModel });
       }
       if (part.text) {
+        if (!hasText && stopKeepAlive) { stopKeepAlive(); stopKeepAlive = null; }
         hasText = true;
         sendEvent(res, { type: 'delta', text: part.text });
       }
@@ -181,16 +231,20 @@ app.post('/api/chat', rateLimit, async (req, res) => {
     }
     res.end();
   } catch (error) {
-    const message = controller.signal.aborted
-      ? 'The provider took too long to respond. Please try again.'
-      : error instanceof RequestError ? error.message : 'Could not reach the AI provider. Check your connection and try again.';
-    if (!res.headersSent) res.status(error instanceof RequestError ? Math.min(error.status, 599) : 502).json({ error: message });
+    const message = timedOut
+      ? `This answer hit the ${Math.round(REQUEST_TIMEOUT_MS / 1000)}s request limit. Shorten the request or continue in a new chat.`
+      : controller.signal.aborted
+        ? 'The provider took too long to respond. Please try again.'
+        : error instanceof RequestError ? error.message : 'Could not reach the AI provider. Check your connection and try again.';
+    if (!res.headersSent) res.status(error instanceof RequestError && !timedOut ? Math.min(error.status, 599) : 502).json({ error: message });
     else { sendEvent(res, { type: 'error', message }); res.end(); }
   } finally {
-    if (timeout) clearTimeout(timeout);
+    clearTimeout(timeout);
+    stopKeepAlive?.();
   }
 });
 
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Not found.' }));
 
 export default app;
+export { REQUEST_TIMEOUT_MS, clientKey, limits };

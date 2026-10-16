@@ -2,6 +2,7 @@ import { lazy, Suspense, useMemo, useRef, useState } from 'react';
 import { ArrowDownToLine, ArrowUpRight, Check, Code2, Copy, Eye, FileCode2, FilePlus2, Files, FolderOpen, MoreHorizontal, Plus, RefreshCw, Trash2, X } from 'lucide-react';
 import type { Conversation, WorkspaceFile } from '../types';
 import { buildPreview, downloadFile, downloadProject, fileColor, fileLanguage, safeFilename } from '../lib/files';
+import { copyToClipboard } from '../lib/clipboard.ts';
 
 interface Props {
   conversation: Conversation;
@@ -58,7 +59,11 @@ export default function Canvas(props: Props) {
   };
   const copyFile = () => {
     if (!file) return;
-    navigator.clipboard.writeText(file.content).then(() => { setCopied(true); window.setTimeout(() => setCopied(false), 1600); }).catch(() => props.onNotify('Could not copy to clipboard'));
+    void copyToClipboard(file.content).then((copied) => {
+      if (!copied) { props.onNotify('Could not copy to clipboard'); return; }
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    });
   };
 
   return <aside className={`canvas ${props.mobileOpen ? 'canvas-mobile-open' : ''}`} aria-label="Code canvas">
