@@ -14,7 +14,7 @@ import Canvas from './components/Canvas';
 import ModelLibrary from './components/ModelLibrary';
 import SettingsModal from './components/SettingsModal';
 
-const emptyConfig: AppConfig = { configured: { openrouter: false, gemini: false, groq: false }, ollamaConfigured: false, searchConfigured: false, requiresAccessCode: false };
+const emptyConfig: AppConfig = { configured: { openrouter: false, gemini: false, groq: false, xkiro: false }, ollamaConfigured: false, searchConfigured: false, requiresAccessCode: false };
 
 export default function App() {
   const [initial] = useState(() => ({ chats: loadConversations(), activeId: loadActiveId() }));
@@ -29,7 +29,9 @@ export default function App() {
   const [config, setConfig] = useState<AppConfig>(emptyConfig);
   const [liveModels, setLiveModels] = useState<ModelInfo[]>([]);
   const [ollamaModels, setOllamaModels] = useState<ModelInfo[]>([]);
+  const [xkiroModels, setXkiroModels] = useState<ModelInfo[]>([]);
   const [catalogAvailable, setCatalogAvailable] = useState<boolean | null>(null);
+  const [xkiroAvailable, setXkiroAvailable] = useState<boolean | null>(null);
   const [sending, setSending] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsProvider, setSettingsProvider] = useState<Provider | undefined>();
@@ -52,11 +54,23 @@ export default function App() {
     // variants that are no longer listed as free.
     const freeModels = liveModels.filter(isUsableFreeCatalogModel);
     const available = new Set(freeModels.map((model) => model.id));
-    const curated = CURATED_MODELS.filter((model) => model.provider !== 'openrouter' || catalogAvailable !== true || available.has(model.id));
+    const xkiroFree = xkiroAvailable ? xkiroModels : [];
+    const xkiroIds = new Set(xkiroFree.map((model) => model.id));
+    const curated = CURATED_MODELS.filter((model) => {
+      if (model.provider === 'openrouter') return catalogAvailable !== true || available.has(model.id);
+      if (model.provider === 'xkiro') return xkiroAvailable !== true || xkiroIds.has(model.id);
+      return true;
+    });
     const ids = new Set(curated.map((model) => `${model.provider}:${model.id}`));
-    return [...curated, ...[...freeModels, ...ollamaModels]
+    return [...curated, ...[...freeModels, ...ollamaModels, ...xkiroFree]
       .filter((model) => !ids.has(`${model.provider}:${model.id}`))];
-  }, [catalogAvailable, liveModels, ollamaModels]);
+  }, [catalogAvailable, liveModels, ollamaModels, xkiroAvailable, xkiroModels]);
+
+  // Display-only: true only when every live catalogue answered. The per-provider
+  // flags above still drive model filtering individually.
+  const liveCatalogsAvailable = catalogAvailable === null || xkiroAvailable === null
+    ? null
+    : catalogAvailable === true && xkiroAvailable === true;
 
   const notify = useCallback((message: string) => {
     setToast(message);
@@ -91,10 +105,13 @@ export default function App() {
       const result = await response.json();
       setLiveModels(Array.isArray(result.models) ? result.models : []);
       setOllamaModels(Array.isArray(result.ollamaModels) ? result.ollamaModels : []);
+      setXkiroModels(Array.isArray(result.xkiroModels) ? result.xkiroModels : []);
       setCatalogAvailable(Boolean(result.catalogAvailable));
+      setXkiroAvailable(Boolean(result.xkiroAvailable));
       catalogLoaded.current = Boolean(result.catalogAvailable);
     } catch {
       setCatalogAvailable(false);
+      setXkiroAvailable(false);
       catalogLoaded.current = false;
     } finally { catalogLoading.current = false; }
   }, []);
@@ -103,7 +120,7 @@ export default function App() {
     if (provider === 'ollama') return config.ollamaConfigured && ollamaModels.length > 0;
     return Boolean(credentials.keys[provider] || config.configured[provider]);
   }, [config, credentials, ollamaModels]);
-  const anyConnected = (['openrouter', 'gemini', 'groq', 'ollama'] as Provider[]).some(isConnected);
+  const anyConnected = (['openrouter', 'gemini', 'groq', 'ollama', 'xkiro'] as Provider[]).some(isConnected);
 
   useEffect(() => { void loadModels(); }, [loadModels]);
   useEffect(() => {
@@ -112,15 +129,16 @@ export default function App() {
     setSelectedModel((current) => current.id === preferred.id && current.provider === preferred.provider ? current : preferred);
   }, [isConnected, manualSelection, models]);
   useEffect(() => {
-    if (catalogAvailable !== true || selectedModel.provider !== 'openrouter' ||
-        models.some((model) => model.provider === 'openrouter' && model.id === selectedModel.id)) return;
+    const liveCatalog = selectedModel.provider === 'openrouter' ? catalogAvailable
+      : selectedModel.provider === 'xkiro' ? xkiroAvailable : null;
+    if (liveCatalog !== true || models.some((model) => model.provider === selectedModel.provider && model.id === selectedModel.id)) return;
     const next = models.find((model) => isConnected(model.provider)) ?? DEFAULT_MODEL;
     setSelectedModel(next);
     if (manualSelection) {
       saveModel(next);
       notify(`${selectedModel.name} is no longer listed as free. Switched to ${next.name}.`);
     }
-  }, [catalogAvailable, isConnected, manualSelection, models, notify, selectedModel]);
+  }, [catalogAvailable, isConnected, manualSelection, models, notify, selectedModel, xkiroAvailable]);
 
   const openSettings = useCallback((provider?: Provider) => {
     setSettingsProvider(provider);
@@ -316,12 +334,12 @@ export default function App() {
     <main className="main-column">
       <header className="topbar"><div className="topbar-left"><button className="icon-button mobile-menu-button" onClick={() => setMobileSidebarOpen(true)} aria-label="Open menu"><Menu size={21} /></button><span className="mobile-brand"><Brand /></span><div className="topbar-breadcrumb"><span>Workspace</span><ChevronRight size={15} /><strong>{view === 'library' ? 'Model library' : activeChat.messages.length ? activeChat.title : 'New conversation'}</strong></div></div><div className="topbar-actions"><button className={`topbar-connection ${anyConnected ? 'connected' : ''}`} onClick={() => openSettings()} title={anyConnected ? 'Manage AI connections' : 'Connect an AI model'} aria-label={anyConnected ? 'Manage AI connections' : 'Connect an AI model'}><span className="topbar-connection-dot" /> <span>{anyConnected ? 'Models connected' : 'Connect a model'}</span><KeyRound size={14} /></button>{view === 'studio' && activeChat.messages.length > 0 && <button className="topbar-action-button export-button" onClick={() => downloadConversation(activeChat)} title="Export conversation as Markdown"><ArrowDownToLine size={17} /><span>Export</span></button>}<span className="topbar-divider" /><button className={`topbar-canvas-button ${canvasVisible ? 'is-open' : ''}`} onClick={toggleCanvas}><Code2 size={17} /><span>Canvas</span>{!canvasVisible ? <PanelRightOpen size={15} /> : <span className="canvas-button-spark">✳</span>}</button><button className="topbar-avatar" onClick={() => openSettings()} aria-label="Open settings">AF</button></div></header>
       {view === 'studio' ? <ChatPanel conversation={activeChat} selectedModel={selectedModel || DEFAULT_MODEL} models={models}
-        catalogAvailable={catalogAvailable} connected={anyConnected} sending={sending} contextFile={contextFile}
+        catalogAvailable={liveCatalogsAvailable} connected={anyConnected} sending={sending} contextFile={contextFile}
         searchMode={searchMode} onCycleSearchMode={cycleSearchMode} isConnected={isConnected} onSend={sendMessage}
         onStop={stop} onSelectModel={chooseModel} onLoadModels={() => void loadModels()}
         onLibrary={() => changeView('library')} onOpenSnippet={openSnippet} onClearContext={() => setContextFile(null)}
         onNotify={notify} onSettings={() => openSettings()} />
-        : <ModelLibrary models={models} selected={selectedModel} catalogAvailable={catalogAvailable} isConnected={isConnected} onSelect={chooseModel} onSettings={openSettings} onRefresh={() => void loadModels(true)} />}
+        : <ModelLibrary models={models} selected={selectedModel} catalogAvailable={liveCatalogsAvailable} isConnected={isConnected} onSelect={chooseModel} onSettings={openSettings} onRefresh={() => void loadModels(true)} />}
     </main>
     {(canvasVisible || mobileCanvasOpen) && <Canvas conversation={activeChat} mobileOpen={mobileCanvasOpen} onClose={closeCanvas} onSelectFile={selectFile} onUpdateFile={updateFile} onCreateFile={createFile} onDeleteFile={deleteFile} onAddContext={addContext} onNotify={notify} />}
     {mobileCanvasOpen && <button className="canvas-mobile-scrim" aria-label="Close Canvas" onClick={() => setMobileCanvasOpen(false)} />}

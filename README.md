@@ -30,10 +30,13 @@ npm test          # provider and workspace tests
 | **Google Gemini** | **Gemini 3.8 Flash** (overall recommendation for software engineering), 2.5 Flash, 2.5 Flash-Lite | Create a key in [Google AI Studio](https://aistudio.google.com/apikey); add it in Settings or use `GEMINI_API_KEY`. |
 | **Groq** | GPT-OSS 120B, Qwen 3.8 27B, GPT-OSS 20B | Create a key in [GroqCloud](https://console.groq.com/keys); add it in Settings or use `GROQ_API_KEY`. |
 | **Ollama** | Your installed local conversational models, discovered from `/api/tags` | Run [Ollama](https://github.com/ollama/ollama) on the **same host as the AIFLUX server**, set `OLLAMA_BASE_URL=http://127.0.0.1:11434`, pull a model, and refresh the model library. No cloud API key required. |
+| **xKiro** | **Qwen3 Coder Plus** (1.05M context), **Codestral**, **North Mini Code**, **Devstral 2**, Qwen3.8 Max, Mistral Large 4, and live-discovered free models | Create a free key at [xKiro](https://xkiro.com/register); add it in Settings or use `XKIRO_API_KEY`. |
 
 **Why no “Auto free”?** OpenRouter's [`openrouter/free` router](https://openrouter.ai/docs/guides/routing/routers/free-router) picks a random free model; its catalog also includes [content-safety classifiers](https://openrouter.ai/nvidia/nemotron-3.5-content-safety:free) that answer with labels such as “User Safety: safe” instead of code. AIFLUX now rejects the random router and recognizable non-chat model IDs, filters moderation/embedding/reranking endpoints out of live discovery using model metadata, and stops a stream if the provider reports a safety/utility model. Older saved Auto-free selections are cleared automatically. Existing chat transcripts are not rewritten: if an earlier answer contains safety labels, resend your prompt with a named coding model. An unlabelled or misleading third-party endpoint cannot be guaranteed to behave like a coding model.
 
 **Which model to pick?** [Gemini 3.8 Flash](https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash) is our overall recommendation for software-engineering tasks on a [Google free API tier](https://ai.google.dev/gemini-api/docs/pricing). If you use OpenRouter, start with [Poolside Laguna S 2.1](https://openrouter.ai/poolside/laguna-s-2.1:free), a coding-agent model with 262K context, or [Cohere North Mini Code](https://openrouter.ai/cohere/north-mini-code:free) for quicker iterations. AIFLUX prioritizes a model from a connected provider, respects your manual selection, and removes OpenRouter picks that disappear from the live free catalog. If discovery is unavailable, the curated picks remain visible, but provider availability must be checked at request time. Groq publishes [model IDs](https://console.groq.com/docs/models) and [plan rate limits](https://console.groq.com/docs/rate-limits).
+
+**How free status is checked.** OpenRouter exposes free variants with a `:free` id, so AIFLUX accepts only specific `:free` chat ids. xKiro instead publishes an `access_tier` field on its public [model catalogue](https://docs.xkiro.com/api/list-models/), and its free ids use mixed conventions — some end in `:free`, some do not — so an id alone cannot tell you whether a model is free. AIFLUX therefore filters xKiro's live catalogue by `access_tier: free` and refuses models it did not list as free; if the catalogue is unreachable, only the curated picks and the `vendor/model` id shape are enforced and availability is not verified until you send a request. Free status is always re-checked at request time by the provider.
 
 **Free is not unlimited.** Availability, daily limits, regional eligibility, and free-tier terms can change. On Google's free tier, prompts may be used to improve its products; some OpenRouter free variants may also use inputs and outputs for training. Review each provider's terms before sending sensitive code. [Google pricing](https://ai.google.dev/gemini-api/docs/pricing) · [Poolside free-model details](https://openrouter.ai/poolside/laguna-s-2.1:free)
 
@@ -67,6 +70,7 @@ Copy `.env.example` and set any combination of these values:
 OPENROUTER_API_KEY=
 GEMINI_API_KEY=
 GROQ_API_KEY=
+XKIRO_API_KEY=
 TAVILY_API_KEY=
 OLLAMA_BASE_URL=
 AIFLUX_ACCESS_CODE=
@@ -106,7 +110,7 @@ vercel.json          Vite build and SPA routing configuration
 
 ## Verified locally
 
-`npm test` covers the Vercel function entrypoints, provider request validation, free-only OpenRouter routing, rejection of random/safety/utility models, Gemini/Groq/Ollama request formats, the AIFLUX identity/capability profile on every provider and search path, AI tool planning, Tavily keyless/keyed calls and source sanitization, search/answer streaming, SSE parsing, error redaction, code-file extraction, preview sandbox generation, per-visitor rate limiting behind a proxy, the hosted request budget, and id/clipboard fallbacks for insecure (plain-HTTP) contexts. External AI and Tavily requests are **mocked** in these tests; a real end-to-end search requires a working AI connection and Tavily availability. `npm run build` checks the TypeScript app and builds the production bundle.
+`npm test` covers the Vercel function entrypoints, provider request validation, free-only OpenRouter routing, rejection of random/safety/utility models, Gemini/Groq/Ollama request formats, the AIFLUX identity/capability profile on every provider and search path, AI tool planning, Tavily keyless/keyed calls and source sanitization, search/answer streaming, SSE parsing, error redaction, code-file extraction, preview sandbox generation, per-visitor rate limiting behind a proxy, the hosted request budget, id/clipboard fallbacks for insecure (plain-HTTP) contexts, and xKiro request building, id validation, `access_tier` free filtering and end-to-end streaming. External AI and Tavily requests are **mocked** in these tests; a real end-to-end search requires a working AI connection and Tavily availability. `npm run build` checks the TypeScript app and builds the production bundle.
 
 ---
 

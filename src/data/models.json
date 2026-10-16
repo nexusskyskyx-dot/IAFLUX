@@ -97,5 +97,75 @@
     "description": "Google's lightweight option for quick questions and fast iterations.",
     "strength": "Quick iterations",
     "badge": "FREE TIER"
+  },
+  {
+    "id": "qwen/qwen3-coder-plus:free",
+    "provider": "xkiro",
+    "name": "Qwen3 Coder Plus",
+    "shortName": "Qwen3 Coder+",
+    "description": "A Qwen coding specialist with a 1.05M-token window, free through xKiro's gateway. Strong at whole-file generation and refactors.",
+    "strength": "Coding focused",
+    "badge": "BEST FOR CODE",
+    "contextLength": 1050000
+  },
+  {
+    "id": "mistralai/codestral-2508",
+    "provider": "xkiro",
+    "name": "Mistral Codestral",
+    "shortName": "Codestral",
+    "description": "Mistral's code model with a 256K window and function calling, free on xKiro. Good at fill-in-the-middle edits and code review.",
+    "strength": "Coding focused",
+    "badge": "XKIRO FREE",
+    "contextLength": 256000
+  },
+  {
+    "id": "cohere/north-mini-code",
+    "provider": "xkiro",
+    "name": "Cohere North Mini Code",
+    "shortName": "North Mini Code",
+    "description": "A fast agentic coding model with 256K context and selectable reasoning, free on xKiro. Suited to quick edits and iterations.",
+    "strength": "Fast coding",
+    "badge": "FAST CODING",
+    "contextLength": 256000
+  },
+  {
+    "id": "mistralai/devstral-medium",
+    "provider": "xkiro",
+    "name": "Mistral Devstral 2",
+    "shortName": "Devstral 2",
+    "description": "A coding-agent model tuned for multi-step repository work, free on xKiro with a 256K window and native tool calling.",
+    "strength": "Coding focused",
+    "badge": "FREE MODEL",
+    "contextLength": 256000
+  },
+  {
+    "id": "qwen/qwen3.8-max:free",
+    "provider": "xkiro",
+    "name": "Qwen3.8 Max",
+    "shortName": "Qwen3.8 Max",
+    "description": "Qwen's largest free model on xKiro with a 1M-token window, vision and reasoning. Capable generalist for big contexts.",
+    "strength": "Deep reasoning",
+    "badge": "FREE MODEL",
+    "contextLength": 1000000
+  },
+  {
+    "id": "mistralai/mistral-large-4-0",
+    "provider": "xkiro",
+    "name": "Mistral Large 4",
+    "shortName": "Mistral Large 4",
+    "description": "Mistral's flagship with a 524K window, vision and switchable reasoning, free on xKiro. Strong at long, structured work.",
+    "strength": "Long-context coding",
+    "badge": "FREE MODEL",
+    "contextLength": 524000
+  },
+  {
+    "id": "stealth/big-pickle",
+    "provider": "xkiro",
+    "name": "Big Pickle",
+    "shortName": "Big Pickle",
+    "description": "A 200K-context reasoning model that is free through xKiro. Unbranded, so verify its answers before relying on them.",
+    "strength": "Deep reasoning",
+    "badge": "XKIRO FREE",
+    "contextLength": 200000
   }
 ]

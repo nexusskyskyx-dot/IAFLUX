@@ -20,7 +20,7 @@ export default function SettingsModal({ credentials, config, focusProvider, onSa
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
-  const providers: Exclude<Provider, 'ollama'>[] = ['openrouter', 'gemini', 'groq'];
+  const providers: Exclude<Provider, 'ollama'>[] = ['openrouter', 'gemini', 'groq', 'xkiro'];
   return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
     <div className="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
       <div className="settings-header">
@@ -29,7 +29,7 @@ export default function SettingsModal({ credentials, config, focusProvider, onSa
         <button className="icon-button settings-close" onClick={onClose} aria-label="Close settings"><X size={20} /></button>
       </div>
       <div className="settings-body">
-        <div className="settings-section-heading"><span>AI PROVIDERS</span><span>01 — 03</span></div>
+        <div className="settings-section-heading"><span>AI PROVIDERS</span><span>01 — 04</span></div>
         {providers.map((provider) => <div key={provider} className={`settings-provider ${focusProvider === provider ? 'settings-provider-focus' : ''}`}>
           <ProviderIcon provider={provider} />
           <div className="settings-provider-content">

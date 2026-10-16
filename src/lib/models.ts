@@ -25,6 +25,11 @@ export const PROVIDERS: Record<Provider, { name: string; initial: string; descri
     description: 'Run models privately on the machine hosting AIFLUX.',
     url: 'https://github.com/ollama/ollama', color: 'green',
   },
+  xkiro: {
+    name: 'xKiro', initial: 'X',
+    description: 'One OpenAI-compatible key for a large catalogue of models, 50+ of them free.',
+    url: 'https://xkiro.com/register', color: 'teal',
+  },
 };
 
 export function modelDisplayName(modelId: string, allModels: ModelInfo[]): string {
@@ -32,7 +37,7 @@ export function modelDisplayName(modelId: string, allModels: ModelInfo[]): strin
 }
 
 export function groupModels(models: ModelInfo[]): { provider: Provider; models: ModelInfo[] }[] {
-  return (['openrouter', 'gemini', 'groq', 'ollama'] as Provider[])
+  return (['openrouter', 'gemini', 'groq', 'ollama', 'xkiro'] as Provider[])
     .map((provider) => ({ provider, models: models.filter((model) => model.provider === provider) }))
     .filter((group) => group.models.length > 0);
 }

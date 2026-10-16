@@ -5,6 +5,7 @@ import { timingSafeEqual } from 'node:crypto';
 import {
   RequestError, validateChat, buildRequest, friendlyUpstreamError,
   readSSE, readLines, extractChunk, getFreeOpenRouterModels,
+  getFreeXkiroModels, getXkiroFreeCatalog, xkiroCatalogIsFresh,
 } from './providers.mjs';
 import { planWebSearch, searchWeb, withSearchContext } from './search.mjs';
 
@@ -16,6 +17,7 @@ const envKeys = {
   openrouter: process.env.OPENROUTER_API_KEY || '',
   gemini: process.env.GEMINI_API_KEY || '',
   groq: process.env.GROQ_API_KEY || '',
+  xkiro: process.env.XKIRO_API_KEY || '',
 };
 
 // Vercel (and any reverse proxy) terminates TLS and forwards the request, so the
@@ -64,9 +66,10 @@ app.get('/api/models', async (_req, res) => {
   // Run discovery and the local Ollama lookup together: serially they can exceed
   // a serverless function's execution budget.
   const usedLiveDiscovery = Date.now() - catalogCache.at > 10 * 60 * 1000;
-  const [discovery, ollama] = await Promise.allSettled([
+  const [discovery, ollama, xkiro] = await Promise.allSettled([
     usedLiveDiscovery ? getFreeOpenRouterModels() : Promise.resolve(catalogCache.models),
     ollamaBaseUrl ? fetchOllamaModels() : Promise.resolve([]),
+    xkiroCatalogIsFresh() ? Promise.resolve(getXkiroFreeCatalog()) : getFreeXkiroModels(),
   ]);
   let catalogAvailable = true;
   let models = catalogCache.models;
@@ -81,7 +84,9 @@ app.get('/api/models', async (_req, res) => {
   res.json({
     models,
     ollamaModels: ollama.status === 'fulfilled' ? ollama.value : [],
+    xkiroModels: xkiro.status === 'fulfilled' ? xkiro.value : getXkiroFreeCatalog(),
     catalogAvailable,
+    xkiroAvailable: xkiro.status === 'fulfilled' || getXkiroFreeCatalog().length > 0,
   });
 });
 
@@ -210,9 +215,12 @@ app.post('/api/chat', rateLimit, async (req, res) => {
         const safeMessage = key ? String(part.error).replaceAll(key, '[redacted]') : String(part.error);
         throw new RequestError(502, safeMessage.slice(0, 320));
       }
-      if (input.provider === 'openrouter' && part.model &&
-          (part.model === 'openrouter/free' || isNonChatModelId(part.model))) {
-        throw new RequestError(502, 'OpenRouter returned a safety or utility model instead of a coding assistant. Choose another free model.');
+      // OpenRouter and xKiro are multi-vendor gateways, so a mislabelled route
+      // can answer with a safety or utility model. Stop the stream rather than
+      // presenting that output as a coding answer.
+      if (part.model && (input.provider === 'openrouter' || input.provider === 'xkiro')
+          && (part.model === 'openrouter/free' || isNonChatModelId(part.model))) {
+        throw new RequestError(502, 'The provider returned a safety or utility model instead of a coding assistant. Choose another free model.');
       }
       if (part.model && part.model !== usedModel) {
         usedModel = part.model;

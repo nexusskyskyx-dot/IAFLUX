@@ -14,12 +14,12 @@ interface Props {
   onRefresh: () => void;
 }
 
-type FilterName = 'All models' | 'Coding' | 'OpenRouter' | 'Gemini' | 'Groq' | 'Local';
+type FilterName = 'All models' | 'Coding' | 'OpenRouter' | 'xKiro' | 'Gemini' | 'Groq' | 'Local';
 
 export default function ModelLibrary({ models, selected, catalogAvailable, isConnected, onSelect, onSettings, onRefresh }: Props) {
   const [filter, setFilter] = useState<FilterName>('All models');
   const [search, setSearch] = useState('');
-  const filters: FilterName[] = ['All models', 'Coding', 'OpenRouter', 'Gemini', 'Groq', 'Local'];
+  const filters: FilterName[] = ['All models', 'Coding', 'OpenRouter', 'xKiro', 'Gemini', 'Groq', 'Local'];
   const visible = useMemo(() => models.filter((model) => {
     const matches = `${model.name} ${model.id} ${model.description} ${model.strength}`.toLowerCase().includes(search.toLowerCase());
     const group = filter === 'All models' ||

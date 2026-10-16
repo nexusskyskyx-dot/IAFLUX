@@ -10,7 +10,16 @@ export const PROVIDER_URLS = Object.freeze({
   openrouter: 'https://openrouter.ai/api/v1/chat/completions',
   groq: 'https://api.groq.com/openai/v1/chat/completions',
   gemini: 'https://generativelanguage.googleapis.com/v1beta/models/',
+  xkiro: 'https://api.xkiro.com/v1/chat/completions',
 });
+
+// Public and unmetered: returns chat models only unless another modality is asked
+// for, and carries the authoritative `access_tier` used for the free-only filter.
+const XKIRO_MODELS_URL = 'https://api.xkiro.com/v1/models';
+// xKiro model IDs are `vendor/model`. Unlike OpenRouter, free models do not share
+// a suffix: some end in `:free`, others do not, so the ID alone cannot tell us
+// whether a model is free and we must consult the catalog.
+const XKIRO_MODEL_ID = /^[a-z0-9][a-z0-9._-]{0,40}\/[a-z0-9][a-z0-9._:+@-]{0,80}$/i;
 
 export class RequestError extends Error {
   constructor(status, message) {
@@ -27,7 +36,7 @@ export function validateChat(body, ollamaConfigured = false) {
   if (!['off', 'auto', 'always'].includes(searchMode)) {
     throw new RequestError(400, 'Choose a valid web search mode.');
   }
-  if (!['openrouter', 'gemini', 'groq', 'ollama'].includes(provider)) {
+  if (!['openrouter', 'gemini', 'groq', 'ollama', 'xkiro'].includes(provider)) {
     throw new RequestError(400, 'Choose a supported provider.');
   }
   if (typeof model !== 'string' || model.length > 180) {
@@ -44,6 +53,12 @@ export function validateChat(body, ollamaConfigured = false) {
   }
   if (['gemini', 'groq'].includes(provider) && !catalog.some((entry) => entry.provider === provider && entry.id === model)) {
     throw new RequestError(400, 'This model is not in the supported free-tier catalog.');
+  }
+  if (provider === 'xkiro' && !XKIRO_MODEL_ID.test(model)) {
+    throw new RequestError(400, 'That is not a valid xKiro model id. Use the vendor/model form, for example qwen/qwen3-coder-plus:free.');
+  }
+  if (provider === 'xkiro' && !isXkiroModelAvailable(model)) {
+    throw new RequestError(400, 'That xKiro model is not currently listed as free. Pick a free model from the model library.');
   }
   if (provider === 'ollama' && (!ollamaConfigured || !/^[a-zA-Z0-9._:/-]{1,160}$/.test(model))) {
     throw new RequestError(400, 'Connect Ollama on the server and choose an installed model.');
@@ -122,7 +137,7 @@ export function buildRequest({ provider, model, messages, searchMode = 'off', se
 }
 
 function providerName(provider) {
-  return ({ openrouter: 'OpenRouter', gemini: 'Gemini', groq: 'Groq' })[provider] ?? provider;
+  return ({ openrouter: 'OpenRouter', gemini: 'Gemini', groq: 'Groq', xkiro: 'xKiro', ollama: 'Ollama' })[provider] ?? provider;
 }
 
 export function friendlyUpstreamError(status, raw, key = '') {
@@ -211,6 +226,77 @@ export function extractChunk(format, data) {
     text: typeof content === 'string' ? content : Array.isArray(content) ? content.filter((part) => part.type === 'text').map((part) => part.text || '').join('') : '',
     model: parsed.model,
   };
+}
+
+// xKiro's free status lives in `access_tier`, not in the model id, so the live
+// catalogue is cached here rather than in api-app.mjs: request validation needs
+// it to keep paid models out of a workspace that advertises free models only.
+const XKIRO_CACHE_TTL = 10 * 60 * 1000;
+let xkiroCache = { at: 0, models: [] };
+
+/** Free xKiro models from the last successful discovery (empty if unavailable). */
+export function getXkiroFreeCatalog() {
+  return xkiroCache.models;
+}
+
+/**
+ * Whether a model may be sent to xKiro. Curated picks always pass. When live
+ * discovery has worked, only models it listed as free pass. If discovery has
+ * never succeeded we fall back to the id format check already applied, and say
+ * so in the UI rather than silently allowing any paid model through.
+ */
+export function isXkiroModelAvailable(model) {
+  if (catalog.some((entry) => entry.provider === 'xkiro' && entry.id === model)) return true;
+  if (xkiroCache.models.length) return xkiroCache.models.some((entry) => entry.id === model);
+  return true;
+}
+
+export async function getFreeXkiroModels(fetchImpl = fetch) {
+  const response = await fetchImpl(XKIRO_MODELS_URL, { signal: AbortSignal.timeout(7000) });
+  if (!response.ok) throw new Error('xKiro model catalog unavailable');
+  const json = await response.json();
+  if (!Array.isArray(json.data)) throw new Error('Invalid xKiro model catalog');
+  const featured = new Set(catalog.filter((entry) => entry.provider === 'xkiro').map((entry) => entry.id));
+  const models = json.data
+    // The endpoint returns chat models by default, but stay defensive: a
+    // moderation, embedding or safety endpoint must never reach the composer.
+    .filter((model) => model && typeof model.id === 'string' && model.access_tier === 'free'
+      && !isNonChatModelId(model.id) && !isNonChatModelId(model.display_name || ''))
+    .map((model) => ({
+      id: model.id,
+      provider: 'xkiro',
+      name: String(model.display_name || model.id).replace(/\s*\(free\)\s*$/i, '').slice(0, 80),
+      shortName: String(model.id).split('/').at(-1)?.replace(/:free$/, '').slice(0, 36) || String(model.id).slice(0, 36),
+      description: describeXkiroModel(model),
+      strength: /coder|coding|code|devstral|software.engineer/i.test(`${model.id} ${model.display_name || ''}`) ? 'Coding focused' : 'Free on xKiro',
+      badge: 'FREE MODEL',
+      contextLength: Number(model.context_length) || undefined,
+    }))
+    .sort((a, b) => Number(featured.has(b.id)) - Number(featured.has(a.id)) ||
+      Number(b.strength === 'Coding focused') - Number(a.strength === 'Coding focused') || a.name.localeCompare(b.name))
+    .slice(0, 100);
+  xkiroCache = { at: Date.now(), models };
+  return models;
+}
+
+export function xkiroCatalogIsFresh() {
+  return xkiroCache.models.length > 0 && Date.now() - xkiroCache.at < XKIRO_CACHE_TTL;
+}
+
+function describeXkiroModel(model) {
+  const parts = [];
+  if (Number(model.context_length)) parts.push(`${formatContext(Number(model.context_length))} context`);
+  const capabilities = model.capabilities || {};
+  const flags = ['vision', 'tools', 'reasoning'].filter((key) => capabilities[key]);
+  if (flags.length) parts.push(flags.join(', '));
+  const vendor = model.owned_by || String(model.id).split('/')[0];
+  return `Free on xKiro${parts.length ? ` · ${parts.join(' · ')}` : ''}. Served by ${vendor}.`;
+}
+
+function formatContext(tokens) {
+  if (tokens >= 1_000_000) return `${Number((tokens / 1_000_000).toFixed(2))}M`;
+  if (tokens >= 1_000) return `${Math.round(tokens / 1000)}K`;
+  return String(tokens);
 }
 
 export async function getFreeOpenRouterModels(fetchImpl = fetch) {

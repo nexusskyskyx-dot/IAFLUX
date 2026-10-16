@@ -239,6 +239,7 @@ a { color: inherit; }
    against the violet theme; OpenRouter moves to pink so it is not mistaken
    for the workspace accent. */
 .provider-openrouter { color: #f4a6e6; background: #f4a6e61f; border-color: #f4a6e645; }.provider-gemini { color: #a9c8ff; background: #6995ef1f; border-color: #84b2f343; }.provider-groq { color: #ffbe94; background: #ea975b1d; border-color: #df9e7045; }.provider-ollama { color: #9fe870; background: #9fe8701d; border-color: #9fe87045; }
+.provider-xkiro { color: #7fe3d4; background: #7fe3d41d; border-color: #7fe3d445; }
 
 /* Messages */
 .messages-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
