@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
+import { readFileSync } from 'node:fs';
+
+// The ceiling the platform actually enforces. The request budget must stay
+// under it, or the function is killed mid-stream and the answer is lost.
+const { maxDuration } = JSON.parse(readFileSync(new URL('../vercel.json', import.meta.url), 'utf8')).functions['api/*.js'];
 
 // The shared app reads VERCEL / AIFLUX_REQUEST_TIMEOUT_MS once at import, so load
 // isolated copies with a cache-busting query instead of mutating one instance.
@@ -23,7 +28,9 @@ if (savedTimeout !== undefined) process.env.AIFLUX_REQUEST_TIMEOUT_MS = savedTim
 
 test('hosted deployments stay inside the platform function budget', () => {
   assert.equal(selfHosted.REQUEST_TIMEOUT_MS, 120_000, 'self-hosted keeps the long default');
-  assert.equal(hosted.REQUEST_TIMEOUT_MS, 55_000, 'Vercel finishes before its 60s maxDuration');
+  assert.ok(maxDuration > 60, 'the function budget is raised above the old default so long code is not cut off');
+  assert.ok(hosted.REQUEST_TIMEOUT_MS < maxDuration * 1000,
+    `Vercel finishes before its ${maxDuration}s maxDuration (got ${hosted.REQUEST_TIMEOUT_MS}ms)`);
   assert.equal(custom.REQUEST_TIMEOUT_MS, 9_000, 'operators can override the budget');
 });
 

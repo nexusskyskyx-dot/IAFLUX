@@ -1,11 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ArrowRight, ArrowUpRight, Braces, Check, ChevronDown, Code2, Copy, FileCode2, Globe2, Lightbulb, Paperclip, Send, Sparkles, Square, WandSparkles, X } from 'lucide-react';
+import { ArrowRight, ArrowUpRight, Braces, Check, ChevronDown, Code2, Copy, FileCode2, Globe2, Lightbulb, Loader2, Paperclip, Send, Sparkles, Square, WandSparkles, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { AttachedFile, ChatMessage, Conversation, ModelInfo, Provider, SearchMode } from '../types';
 import { LogoMark, ProviderIcon } from './Brand';
 import ModelPicker from './ModelPicker';
 import { copyToClipboard } from '../lib/clipboard.ts';
+import { MAX_CONTINUATIONS } from '../lib/continuation';
 
 interface Props {
   conversation: Conversation;
@@ -57,6 +58,10 @@ function MessageBody({ message, onOpenSnippet, onNotify }: { message: ChatMessag
     code: ({ children, className }) => <code className={className || 'inline-code'}>{children}</code>,
     a: ({ children, href }) => <a href={href} target="_blank" rel="noopener noreferrer">{children}<ArrowUpRight size={12} /></a>,
   }}>{message.content}</ReactMarkdown></div>;
+}
+
+function ContinuationNotice({ attempt }: { attempt: number }) {
+  return <div className="message-continuation" role="status"><Loader2 size={14} className="continuation-spin" /> Picking the answer back up ({Math.min(attempt + 1, MAX_CONTINUATIONS + 1)} of {MAX_CONTINUATIONS + 1}) — everything written so far is kept.</div>;
 }
 
 function SearchSources({ message }: { message: ChatMessage }) {
@@ -149,8 +154,10 @@ export default function ChatPanel(props: Props) {
         <div className="message-main"><div className="message-byline"><strong>{message.role === 'assistant' ? 'AIFLUX' : 'You'}</strong><span>{message.role === 'assistant' ? message.model ? message.model.split('/').at(-1)?.replace(':free', '') : 'Coding partner' : new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>
           {message.role === 'assistant' && <SearchSources message={message} />}
           {message.role === 'assistant' && !message.content && message.status === 'streaming' ? <div className="thinking-line"><span className="thinking-dots"><i /><i /><i /></span> {message.searchStatus ? 'Checking live sources...' : 'Putting thoughts into motion...'}</div> : message.content ? <MessageBody message={message} onOpenSnippet={props.onOpenSnippet} onNotify={props.onNotify} /> : null}
+          {message.role === 'assistant' && message.continuation && message.status === 'streaming' ? <ContinuationNotice attempt={message.continuation} /> : null}
           {message.attachments?.length ? <div className="message-attachments">{message.attachments.map((file, index) => <span key={`${file.name}-${index}`}><FileCode2 size={13} />{file.name}</span>)}</div> : null}
           {message.status === 'error' && <div className="message-interrupted">Response interrupted. You can try sending your message again.</div>}
+          {message.truncated && message.status === 'done' && <div className="message-interrupted">This answer reached the time limit before the model finished. Ask it to continue for the rest.</div>}
           {message.role === 'assistant' && message.content && message.status !== 'streaming' && <div className="message-actions"><button onClick={() => copyMessage(message)}>{copiedId === message.id ? <Check size={14} /> : <Copy size={14} />}{copiedId === message.id ? 'Copied' : 'Copy response'}</button></div>}
         </div>
       </div>)}

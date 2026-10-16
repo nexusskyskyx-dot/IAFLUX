@@ -66,3 +66,22 @@ test('search failures and interrupted streams are surfaced rather than silently 
     await assert.rejects(requestChat(args([])), /Missing provider key/);
   } finally { globalThis.fetch = originalFetch; }
 });
+
+test('a stream the server cut short resolves as resumable, while a clean finish does not', async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    const events = [];
+    globalThis.fetch = async () => sse(
+      frame({ type: 'start', model: 'gemini-2.5-flash' })
+      + frame({ type: 'delta', text: 'Half of a long file…' })
+      + frame({ type: 'truncated', reason: 'timeout' }),
+    );
+    // Throwing here would discard the text already on screen and show an error.
+    const result = await requestChat(args(events));
+    assert.deepEqual(result, { truncated: true });
+    assert.deepEqual(events.map((event) => event.type), ['start', 'delta', 'truncated']);
+
+    globalThis.fetch = async () => sse(frame({ type: 'start', model: 'gemini-2.5-flash' }) + frame({ type: 'delta', text: 'Done.' }) + frame({ type: 'done', model: 'gemini-2.5-flash' }));
+    assert.deepEqual(await requestChat(args([])), { truncated: false });
+  } finally { globalThis.fetch = originalFetch; }
+});

@@ -5,8 +5,14 @@ export type StreamEvent =
   | { type: 'delta'; text: string }
   | { type: 'search'; phase: 'planning' | 'searching' | 'skipped'; query?: string }
   | { type: 'sources'; query: string; sources: WebSource[] }
+  | { type: 'truncated'; reason: string }
   | { type: 'error'; message: string };
 
+/**
+ * Streams one request. Resolves with `truncated: true` when the server stopped
+ * at its own request limit — the model was still writing, so that is resumable
+ * rather than a failure, and it is reported instead of thrown.
+ */
 export async function requestChat(input: {
   provider: Provider;
   model: string;
@@ -17,7 +23,7 @@ export async function requestChat(input: {
   accessCode: string;
   signal: AbortSignal;
   onEvent: (event: StreamEvent) => void;
-}) {
+}): Promise<{ truncated: boolean }> {
   const response = await fetch('/api/chat', {
     method: 'POST',
     headers: {
@@ -48,6 +54,7 @@ export async function requestChat(input: {
   const decoder = new TextDecoder();
   let buffer = '';
   let finished = false;
+  let truncated = false;
   try {
     while (true) {
       const { value, done } = await reader.read();
@@ -63,6 +70,7 @@ export async function requestChat(input: {
           const event = JSON.parse(data) as StreamEvent;
           input.onEvent(event);
           if (event.type === 'error') throw new Error(event.message);
+          if (event.type === 'truncated') truncated = true;
           if (event.type === 'done') finished = true;
         } catch (error) {
           if (error instanceof SyntaxError) continue;
@@ -70,7 +78,12 @@ export async function requestChat(input: {
         }
       }
     }
-    if (!finished && !input.signal.aborted) throw new Error('The answer was cut off before it finished. A hosted deployment may have hit its request time limit — try a shorter request.');
+    // `truncated` counts as a clean ending: the server said so explicitly, and
+    // the caller decides whether to pick the answer back up.
+    if (!finished && !truncated && !input.signal.aborted) {
+      throw new Error('The answer was cut off before it finished. A hosted deployment may have hit its request time limit — try a shorter request.');
+    }
+    return { truncated };
   } finally {
     reader.releaseLock();
   }

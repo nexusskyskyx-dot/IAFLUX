@@ -31,6 +31,10 @@ export interface ChatMessage {
   createdAt: number;
   status?: 'streaming' | 'done' | 'error';
   model?: string;
+  /** Which extra attempt is currently filling this in, once a time limit cut it short. */
+  continuation?: number;
+  /** Ended at the request limit rather than because the model was finished. */
+  truncated?: boolean;
   attachments?: AttachedFile[];
   search?: { query: string; sources: WebSource[] };
   searchSkipped?: boolean;

@@ -7,6 +7,7 @@ import { hasSavedModel, loadActiveId, loadConversations, loadCredentials, loadMo
 import { newId } from './lib/id.ts';
 import { isUsableFreeCatalogModel } from './lib/model-policy.mjs';
 import { requestChat } from './lib/chat';
+import { MAX_CONTINUATIONS, continuationInstruction, stripOverlap } from './lib/continuation';
 import { Brand } from './components/Brand';
 import Sidebar from './components/Sidebar';
 import ChatPanel from './components/ChatPanel';
@@ -230,37 +231,81 @@ export default function App() {
     abortRef.current = { controller, chatId };
     let responseText = '';
     let actualModel = selectedModel.name;
-    void requestChat({
-      provider: selectedModel.provider,
-      model: selectedModel.id,
-      messages: history,
-      key: selectedModel.provider !== 'ollama' ? credentials.keys[selectedModel.provider] : '',
-      searchKey: credentials.searchKey,
-      searchMode,
-      accessCode: credentials.accessCode,
-      signal: controller.signal,
-      onEvent: (event) => {
-        if (event.type === 'search') {
-          patchMessage(chatId, assistantId, (message) => ({ ...message,
-            searchStatus: event.phase === 'skipped' ? undefined : event.phase,
-            searchSkipped: event.phase === 'skipped',
-            searchQuery: event.query,
+    let endedShort = false;
+
+    // One request may run out of time while the model is still writing. Rather
+    // than showing a half-finished answer, send the partial text back and ask
+    // for the remainder, repeating until it finishes or the attempts run out.
+    const runTurn = async (): Promise<void> => {
+      for (let attempt = 0; ; attempt += 1) {
+        const messages = attempt === 0
+          ? history
+          : [...history, { role: 'user' as const, content: continuationInstruction(responseText) }];
+        const beforeHop = responseText;
+        let hopText = '';
+        let truncated = false;
+        try {
+          ({ truncated } = await requestChat({
+            provider: selectedModel.provider,
+            model: selectedModel.id,
+            messages,
+            key: selectedModel.provider !== 'ollama' ? credentials.keys[selectedModel.provider] : '',
+            searchKey: credentials.searchKey,
+            searchMode: attempt === 0 ? searchMode : 'off',
+            accessCode: credentials.accessCode,
+            signal: controller.signal,
+            onEvent: (event) => {
+              if (event.type === 'search') {
+                patchMessage(chatId, assistantId, (message) => ({ ...message,
+                  searchStatus: event.phase === 'skipped' ? undefined : event.phase,
+                  searchSkipped: event.phase === 'skipped',
+                  searchQuery: event.query,
+                }));
+              }
+              if (event.type === 'sources') {
+                patchMessage(chatId, assistantId, (message) => ({ ...message, searchStatus: undefined, searchQuery: undefined,
+                  search: { query: event.query, sources: event.sources } }));
+              }
+              if (event.type === 'delta') {
+                hopText += event.text;
+                responseText += event.text;
+                patchMessage(chatId, assistantId, (message) => ({ ...message, content: message.content + event.text }));
+              }
+              if (event.type === 'model' && event.model) {
+                actualModel = event.model.split('/').at(-1)?.replace(':free', '') || event.model;
+                patchMessage(chatId, assistantId, (message) => ({ ...message, model: actualModel }));
+              }
+            },
           }));
+        } catch (error) {
+          // Text already streamed is worth keeping, so fix up the tail here and
+          // let the caller decide whether the message ends as an error.
+          trimOverlap(beforeHop, hopText);
+          throw error;
         }
-        if (event.type === 'sources') {
-          patchMessage(chatId, assistantId, (message) => ({ ...message, searchStatus: undefined, searchQuery: undefined,
-            search: { query: event.query, sources: event.sources } }));
+        trimOverlap(beforeHop, hopText);
+
+        if (!truncated || controller.signal.aborted) return;
+        if (attempt >= MAX_CONTINUATIONS) {
+          endedShort = true;
+          notify(`This answer needed more than ${MAX_CONTINUATIONS + 1} attempts. It stopped where the time limit allowed — ask it to continue for the rest.`);
+          return;
         }
-        if (event.type === 'delta') {
-          responseText += event.text;
-          patchMessage(chatId, assistantId, (message) => ({ ...message, content: message.content + event.text }));
-        }
-        if (event.type === 'model' && event.model) {
-          actualModel = event.model.split('/').at(-1)?.replace(':free', '') || event.model;
-          patchMessage(chatId, assistantId, (message) => ({ ...message, model: actualModel }));
-        }
-      },
-    }).then(() => {
+        patchMessage(chatId, assistantId, (message) => ({ ...message, continuation: attempt + 1, searchStatus: undefined, searchQuery: undefined }));
+      }
+    };
+
+    // A model that restarts instead of continuing leaves the text duplicated.
+    // Compare this hop against everything before it and drop the repeated part
+    // from the tail. For a well-behaved model this is a no-op.
+    const trimOverlap = (before: string, hop: string): void => {
+      const kept = stripOverlap(before, hop);
+      if (kept === hop) return;
+      responseText = responseText.slice(0, responseText.length - (hop.length - kept.length));
+      patchMessage(chatId, assistantId, (message) => ({ ...message, content: responseText }));
+    };
+
+    void runTurn().then(() => {
       const text = responseText;
       const count = extractCodeFiles(text, updated.files).length;
       setChats((previous) => previous.map((chat) => {
@@ -270,7 +315,7 @@ export default function App() {
         return {
           ...chat, updatedAt: Date.now(), files,
           selectedFileId: generated[0]?.id || chat.selectedFileId,
-          messages: chat.messages.map((message) => message.id === assistantId ? { ...message, content: text, status: 'done', model: actualModel, searchStatus: undefined, searchQuery: undefined } : message),
+          messages: chat.messages.map((message) => message.id === assistantId ? { ...message, content: text, status: 'done', model: actualModel, truncated: endedShort, continuation: undefined, searchStatus: undefined, searchQuery: undefined } : message),
         };
       }));
       if (count) notify(`${count} ${count === 1 ? 'file' : 'files'} added to Canvas`);
@@ -278,7 +323,7 @@ export default function App() {
       const aborted = controller.signal.aborted;
       const message = error instanceof Error ? error.message : 'Something went wrong.';
       patchMessage(chatId, assistantId, (previous) => ({
-        ...previous, content: previous.content || (aborted ? 'Generation stopped.' : `**Could not generate a response.** ${message}`), status: 'error', searchStatus: undefined, searchQuery: undefined,
+        ...previous, content: previous.content || (aborted ? 'Generation stopped.' : `**Could not generate a response.** ${message}`), status: 'error', continuation: undefined, searchStatus: undefined, searchQuery: undefined,
       }));
       if (!aborted) notify(message);
     }).finally(() => {

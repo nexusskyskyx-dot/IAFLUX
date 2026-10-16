@@ -22,6 +22,10 @@ test('chat displays the search mode, trusted source links, and honest skipped-se
         } },
         { id: '3', role: 'user', content: 'Build a button', createdAt: 3 },
         { id: '4', role: 'assistant', content: 'Here is a button.', status: 'done', createdAt: 4, searchSkipped: true },
+        // Mid-continuation: the answer is being picked back up, not restarted.
+        { id: '5', role: 'assistant', content: 'Half of a long file…', status: 'streaming', createdAt: 5, continuation: 2 },
+        // Ran out of attempts at the request limit.
+        { id: '6', role: 'assistant', content: 'The rest is still missing.', status: 'done', createdAt: 6, truncated: true },
       ],
     };
     const props = {
@@ -39,6 +43,9 @@ test('chat displays the search mode, trusted source links, and honest skipped-se
     assert.match(html, /No live web search used for this answer/);
     assert.doesNotMatch(html, /href="javascript:/);
     assert.doesNotMatch(html, /Unsafe link/);
+    assert.match(html, /Picking the answer back up \(3 of 5\)/, 'a resumed answer says so instead of looking stuck');
+    assert.match(html, /everything written so far is kept/);
+    assert.match(html, /reached the time limit before the model finished/, 'a cut-short answer is not passed off as finished');
   } finally { await vite.close(); }
 });
 

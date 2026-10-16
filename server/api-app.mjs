@@ -27,10 +27,12 @@ const envKeys = {
 const trustProxy = Boolean(process.env.VERCEL) || process.env.AIFLUX_TRUST_PROXY === '1';
 if (trustProxy) app.set('trust proxy', true);
 
-// Vercel (Hobby) kills a function at its maxDuration — 10s by default, 60s once
-// `functions.maxDuration` is set. Self-hosted runs can afford longer. Finishing
-// just inside the platform budget turns a hard 504 into a readable message.
-const DEFAULT_TIMEOUT_MS = process.env.VERCEL ? 55_000 : 120_000;
+// Vercel ends a function at its maxDuration, which vercel.json sets to 300s —
+// the documented maximum on both Hobby and Pro. Stopping a little inside that
+// wall lets us tell the client the answer is resumable instead of being killed
+// mid-stream with a 504. Lower AIFLUX_REQUEST_TIMEOUT_MS if your project is on
+// an older configuration with a smaller ceiling.
+const DEFAULT_TIMEOUT_MS = process.env.VERCEL ? 290_000 : 120_000;
 const REQUEST_TIMEOUT_MS = Math.max(5_000, Math.min(
   Number(process.env.AIFLUX_REQUEST_TIMEOUT_MS) || DEFAULT_TIMEOUT_MS,
   600_000,
@@ -239,12 +241,18 @@ app.post('/api/chat', rateLimit, async (req, res) => {
     }
     res.end();
   } catch (error) {
-    const message = timedOut
-      ? `This answer hit the ${Math.round(REQUEST_TIMEOUT_MS / 1000)}s request limit. Shorten the request or continue in a new chat.`
-      : controller.signal.aborted
-        ? 'The provider took too long to respond. Please try again.'
-        : error instanceof RequestError ? error.message : 'Could not reach the AI provider. Check your connection and try again.';
-    if (!res.headersSent) res.status(error instanceof RequestError && !timedOut ? Math.min(error.status, 599) : 502).json({ error: message });
+    // Hitting the request budget is not a failure — the model was still writing.
+    // Say so distinctly so the client can pick the answer back up instead of
+    // showing the partial text as an error.
+    if (timedOut) {
+      if (!res.headersSent) res.status(504).json({ error: `The request reached the ${Math.round(REQUEST_TIMEOUT_MS / 1000)}s limit before the answer finished.` });
+      else { sendEvent(res, { type: 'truncated', reason: 'timeout' }); res.end(); }
+      return;
+    }
+    const message = controller.signal.aborted
+      ? 'The provider took too long to respond. Please try again.'
+      : error instanceof RequestError ? error.message : 'Could not reach the AI provider. Check your connection and try again.';
+    if (!res.headersSent) res.status(error instanceof RequestError ? Math.min(error.status, 599) : 502).json({ error: message });
     else { sendEvent(res, { type: 'error', message }); res.end(); }
   } finally {
     clearTimeout(timeout);
