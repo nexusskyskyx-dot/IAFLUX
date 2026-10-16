@@ -17,12 +17,12 @@ async function languageExtension(name: string): Promise<Extension | null> {
   return null;
 }
 
-export default function CodeEditor({ file, onChange }: { file: WorkspaceFile; onChange: (value: string) => void }) {
+export default function CodeEditor({ file, onChange, readOnly = false }: { file: WorkspaceFile; onChange: (value: string) => void; readOnly?: boolean }) {
   const [extensions, setExtensions] = useState<Extension[]>([]);
   useEffect(() => {
     let active = true;
     void languageExtension(file.name).then((extension) => { if (active) setExtensions(extension ? [extension] : []); }).catch(() => { if (active) setExtensions([]); });
     return () => { active = false; };
   }, [file.name]);
-  return <CodeMirror value={file.content} onChange={onChange} extensions={extensions} theme={oneDark} basicSetup={{ foldGutter: false, highlightActiveLine: true, highlightActiveLineGutter: false }} height="100%" className="flux-editor" aria-label={`Edit ${file.name}`} />;
+  return <CodeMirror value={file.content} onChange={readOnly ? undefined : onChange} extensions={extensions} theme={oneDark} readOnly={readOnly} editable={!readOnly} basicSetup={{ foldGutter: false, highlightActiveLine: !readOnly, highlightActiveLineGutter: false }} height="100%" className={`flux-editor ${readOnly ? 'flux-editor-readonly' : ''}`} aria-label={`${readOnly ? 'View' : 'Edit'} ${file.name}`} />;
 }

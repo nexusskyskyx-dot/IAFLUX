@@ -23,6 +23,8 @@ export interface ModelInfo {
 export interface AttachedFile {
   name: string;
   content: string;
+  /** Present only when this exact, full Canvas file was explicitly attached for an AI edit. */
+  canvasFileId?: string;
 }
 
 export interface ChatMessage {
@@ -44,6 +46,9 @@ export interface WorkspaceFile {
   name: string;
   content: string;
   origin: 'starter' | 'generated' | 'user';
+  /** Snapshot immediately before the latest edit, used to render the Canvas diff. */
+  previousContent?: string;
+  lastChangedBy?: 'ai' | 'user';
 }
 
 export interface Conversation {

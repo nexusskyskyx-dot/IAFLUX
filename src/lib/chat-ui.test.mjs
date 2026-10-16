@@ -81,12 +81,23 @@ test('Canvas exposes an explicit GitHub publishing action with a review-before-p
   try {
     const { default: Canvas } = await vite.ssrLoadModule('/src/components/Canvas.tsx');
     const { default: GitHubPublishModal } = await vite.ssrLoadModule('/src/components/GitHubPublishModal.tsx');
-    const conversation = { id: 'test-chat', title: 'Publish', createdAt: 1, updatedAt: 1, files: [], selectedFileId: null, messages: [] };
+    const file = { id: 'file-1', name: 'index.html', content: '<h1>New</h1>', previousContent: '<h1>Old</h1>', lastChangedBy: 'ai', origin: 'generated' };
+    const conversation = { id: 'test-chat', title: 'Publish', createdAt: 1, updatedAt: 1, files: [file], selectedFileId: file.id, messages: [] };
     const canvasHtml = renderToStaticMarkup(React.createElement(Canvas, {
-      conversation, mobileOpen: false, onClose() {}, onSelectFile() {}, onUpdateFile() {},
+      conversation, mobileOpen: false, onClose() {}, onSelectFile() {}, onUpdateFile() {}, onRestoreFile() {},
       onCreateFile() {}, onDeleteFile() {}, onAddContext() {}, onNotify() {}, onPublishGitHub() {},
     }));
     assert.match(canvasHtml, /Review and publish Canvas files to GitHub/);
+    assert.match(canvasHtml, /aria-label="Canvas modes"/);
+    for (const mode of ['VIEW', 'EDIT', 'TEST', 'DIFF']) assert.match(canvasHtml, new RegExp(`${mode}<\\/button>`));
+    assert.match(canvasHtml, /Edit index\.html with AI/);
+    const { default: CanvasDiff } = await vite.ssrLoadModule('/src/components/CanvasDiff.tsx');
+    const diffHtml = renderToStaticMarkup(React.createElement(CanvasDiff, { file, onRestore() {} }));
+    assert.match(diffHtml, /diff-added/);
+    assert.match(diffHtml, /diff-removed/);
+    assert.match(diffHtml, /New/);
+    assert.match(diffHtml, /Old/);
+    assert.match(diffHtml, /Restore the saved previous version/);
     const modalHtml = renderToStaticMarkup(React.createElement(GitHubPublishModal, {
       files: [], onClose() {}, onNotify() {}, onConnect() {},
     }));

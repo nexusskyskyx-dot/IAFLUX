@@ -33,7 +33,7 @@ export const STARTER_CODE = `<!DOCTYPE html>
 </html>`;
 
 export function createDraft(): Conversation {
-  const file: WorkspaceFile = { id: crypto.randomUUID(), name: 'index.html', content: STARTER_CODE, origin: 'starter' };
+  const file: WorkspaceFile = { id: crypto.randomUUID(), name: 'index.html', content: STARTER_CODE, origin: 'starter', previousContent: STARTER_CODE };
   return {
     id: crypto.randomUUID(), title: 'New conversation',
     createdAt: Date.now(), updatedAt: Date.now(), messages: [],
@@ -74,7 +74,11 @@ export function fileColor(name: string): string {
   return 'muted';
 }
 
-export function extractCodeFiles(markdown: string, existing: WorkspaceFile[]): WorkspaceFile[] {
+export function extractCodeFiles(
+  markdown: string,
+  existing: WorkspaceFile[],
+  editableTargets: Pick<WorkspaceFile, 'id' | 'name' | 'content'>[] = [],
+): WorkspaceFile[] {
   const blocks = /```([^\n]*)\n([\s\S]*?)```/g;
   const found: WorkspaceFile[] = [];
   let match: RegExpExecArray | null;
@@ -88,17 +92,33 @@ export function extractCodeFiles(markdown: string, existing: WorkspaceFile[]): W
     const commentMatch = content.match(/^(?:\/\/|#|<!--)\s*(?:file(?:name)?\s*:\s*)?([\w./-]+\.[a-z\d]+)(?:\s*-->)?\s*\n/i);
     let name = safeFilename(filenameMatch?.[1] || colonMatch?.[1] || commentMatch?.[1] || `snippet-${found.length + 1}.${extensionFor(language)}`);
     if (commentMatch && !filenameMatch && !colonMatch) content = content.slice(commentMatch[0].length);
-    // Never silently overwrite a file edited by the user or generated in a previous answer.
+
     const collision = [...existing, ...found].find((file) => file.name === name);
+    const editTarget = collision && editableTargets.find((target) =>
+      target.id === collision.id && target.name === name && target.content === collision.content,
+    );
+    if (collision && editTarget) {
+      found.push({
+        id: collision.id, name, content, origin: 'generated',
+        previousContent: collision.content, lastChangedBy: 'ai',
+      });
+      continue;
+    }
+
+    let previousContent = '';
     if (collision && collision.origin !== 'starter') {
+      // Existing Canvas files can only be edited when the user attached that exact,
+      // unchanged file. Every other name collision gets a separate version.
       const dot = name.lastIndexOf('.');
       const base = dot >= 0 ? name.slice(0, dot) : name;
       const extension = dot >= 0 ? name.slice(dot) : '';
       let version = 2;
       while ([...existing, ...found].some((file) => file.name === `${base}-${version}${extension}`)) version++;
       name = `${base}-${version}${extension}`;
+    } else if (collision) {
+      previousContent = collision.content;
     }
-    found.push({ id: crypto.randomUUID(), name, content, origin: 'generated' });
+    found.push({ id: crypto.randomUUID(), name, content, origin: 'generated', previousContent, lastChangedBy: 'ai' });
   }
   return found;
 }
@@ -106,9 +126,14 @@ export function extractCodeFiles(markdown: string, existing: WorkspaceFile[]): W
 export function mergeGeneratedFiles(existing: WorkspaceFile[], generated: WorkspaceFile[]): WorkspaceFile[] {
   const files = [...existing];
   for (const file of generated) {
+    const existingIndex = files.findIndex((item) => item.id === file.id);
+    if (existingIndex >= 0) {
+      files.splice(existingIndex, 1, { ...file, previousContent: file.previousContent ?? files[existingIndex].content });
+      continue;
+    }
     const starterIndex = files.findIndex((item) => item.name === file.name && item.origin === 'starter');
-    if (starterIndex >= 0) files.splice(starterIndex, 1, file);
-    else files.push(file);
+    if (starterIndex >= 0) files.splice(starterIndex, 1, { ...file, previousContent: file.previousContent ?? files[starterIndex].content });
+    else files.push({ ...file, previousContent: file.previousContent ?? '' });
   }
   return files;
 }

@@ -32,7 +32,9 @@ test('the central capability profile covers shipped features and keeps identity 
   assert.match(prompt, /^You are AIFLUX,/);
   assert.match(prompt, /user selected the Gemini model gemini-2\.5-flash for this reply/);
   for (const feature of AIFLUX_FEATURES) assert.ok(prompt.includes(`- ${feature}`), `Feature missing from prompt: ${feature}`);
-  assert.match(prompt, /Canvas turns named fenced code blocks into files/);
+  assert.match(prompt, /Canvas files can be viewed, edited, safely tested as HTML\/SVG/);
+  assert.match(prompt, /explicitly attaches a Canvas file and asks for an edit/);
+  assert.match(prompt, /preserves the previous contents for review/);
   assert.match(prompt, /HTML or SVG projects in a sandbox/);
   assert.match(prompt, /attach local text\/code files/);
   assert.match(prompt, /GitHub repository file, issue, or pull request/);
@@ -41,8 +43,7 @@ test('the central capability profile covers shipped features and keeps identity 
   assert.match(prompt, /local browser conversations/);
   assert.match(prompt, /Context\+ automatically adds relevant server-curated reference notes/);
   assert.match(prompt, /AIFLUX Context\+ reference library:/);
-  assert.match(prompt, /cannot directly edit an existing Canvas file/);
-  assert.match(prompt, /cannot.*run commands or tests, deploy code/);
+  assert.match(prompt, /cannot independently run shell commands or automated test suites/);
   assert.match(prompt, /```html filename="index\.html"/);
 });
 

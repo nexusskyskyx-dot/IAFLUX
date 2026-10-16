@@ -388,10 +388,13 @@ export default function App() {
       },
     }).then(() => {
       const text = responseText;
-      const count = extractCodeFiles(text, updated.files).length;
+      const editableTargets = userMessage.attachments?.flatMap((attachment) =>
+        attachment.canvasFileId ? [{ id: attachment.canvasFileId, name: attachment.name, content: attachment.content }] : [],
+      ) || [];
+      const count = extractCodeFiles(text, updated.files, editableTargets).length;
       setChats((previous) => previous.map((chat) => {
         if (chat.id !== chatId) return chat;
-        const generated = extractCodeFiles(text, chat.files);
+        const generated = extractCodeFiles(text, chat.files, editableTargets);
         const files = mergeGeneratedFiles(chat.files, generated);
         return {
           ...chat, updatedAt: Date.now(), files,
@@ -399,7 +402,7 @@ export default function App() {
           messages: chat.messages.map((message) => message.id === assistantId ? { ...message, content: text, status: 'done', model: actualModel, searchStatus: undefined, searchQuery: undefined } : message),
         };
       }));
-      if (count) notify(`${count} ${count === 1 ? 'file' : 'files'} added to Canvas`);
+      if (count) notify(`${count} ${count === 1 ? 'file change' : 'file changes'} applied to Canvas`);
     }).catch((error: unknown) => {
       const aborted = controller.signal.aborted;
       const message = error instanceof Error ? error.message : 'Something went wrong.';
@@ -414,9 +417,17 @@ export default function App() {
   };
 
   const selectFile = (id: string) => updateActive((chat) => ({ ...chat, selectedFileId: id }));
-  const updateFile = (id: string, content: string) => updateActive((chat) => ({ ...chat, updatedAt: Date.now(), files: chat.files.map((file) => file.id === id ? { ...file, content, origin: 'user' } : file) }));
+  const updateFile = (id: string, content: string) => updateActive((chat) => ({ ...chat, updatedAt: Date.now(), files: chat.files.map((file) => file.id === id ? {
+    ...file, content, origin: 'user', previousContent: file.lastChangedBy === 'user' ? file.previousContent ?? file.content : file.content, lastChangedBy: 'user',
+  } : file) }));
+  const restoreFile = (id: string) => {
+    updateActive((chat) => ({ ...chat, updatedAt: Date.now(), files: chat.files.map((file) => file.id === id && file.previousContent !== undefined ? {
+      ...file, content: file.previousContent, previousContent: file.previousContent, origin: 'user', lastChangedBy: 'user',
+    } : file) }));
+    notify('Previous Canvas version restored');
+  };
   const createFile = (name: string, content = '') => {
-    const file: WorkspaceFile = { id: crypto.randomUUID(), name, content, origin: 'user' };
+    const file: WorkspaceFile = { id: crypto.randomUUID(), name, content, origin: 'user', previousContent: content, lastChangedBy: 'user' };
     updateActive((chat) => ({ ...chat, updatedAt: Date.now(), files: [...chat.files, file], selectedFileId: file.id }));
     notify(`${name} added to Canvas`);
   };
@@ -428,9 +439,13 @@ export default function App() {
     notify('File deleted');
   };
   const addContext = (file: WorkspaceFile) => {
-    setContextFile({ name: file.name, content: file.content.slice(0, 30_000) });
-    if (file.content.length > 30_000) notify('The first 30 KB of this file was added to your next message.');
-    else notify(`${file.name} attached to your next message`);
+    const canApplyCanvasEdit = file.content.length <= 100_000;
+    setContextFile({
+      name: file.name, content: canApplyCanvasEdit ? file.content : file.content.slice(0, 30_000),
+      ...(canApplyCanvasEdit ? { canvasFileId: file.id } : {}),
+    });
+    if (!canApplyCanvasEdit) notify('Only the first 30 KB was attached; automatic edits require the full Canvas file under 100 KB.');
+    else notify(`${file.name} attached. Ask AIFLUX to edit it, then review the DIFF.`);
     setMobileCanvasOpen(false);
     setView('studio');
   };
@@ -467,7 +482,7 @@ export default function App() {
         onNotify={notify} onSettings={() => openSettings()} onGitHub={() => setGithubOpen(true)} />
         : <ModelLibrary models={models} selected={selectedModel} catalogAvailable={freeCatalogAvailable} isConnected={isConnected} onSelect={chooseModel} onSettings={openSettings} onRefresh={() => void loadModels(true)} />}
     </main>
-    {(canvasVisible || mobileCanvasOpen) && <Canvas conversation={activeChat} mobileOpen={mobileCanvasOpen} onClose={closeCanvas} onSelectFile={selectFile} onUpdateFile={updateFile} onCreateFile={createFile} onDeleteFile={deleteFile} onAddContext={addContext} onNotify={notify} onPublishGitHub={() => setGithubPublishOpen(true)} />}
+    {(canvasVisible || mobileCanvasOpen) && <Canvas conversation={activeChat} mobileOpen={mobileCanvasOpen} onClose={closeCanvas} onSelectFile={selectFile} onUpdateFile={updateFile} onRestoreFile={restoreFile} onCreateFile={createFile} onDeleteFile={deleteFile} onAddContext={addContext} onNotify={notify} onPublishGitHub={() => setGithubPublishOpen(true)} />}
     {mobileCanvasOpen && <button className="canvas-mobile-scrim" aria-label="Close Canvas" onClick={() => setMobileCanvasOpen(false)} />}
     {settingsOpen && <SettingsModal credentials={credentials} config={config} focusProvider={settingsProvider} onSave={saveSettings} onClose={() => setSettingsOpen(false)} />}
     {githubOpen && <GitHubContextModal onClose={() => setGithubOpen(false)} onUseContext={(file) => { setContextFile(file); setGithubOpen(false); notify(`${file.name} added as context for your next message.`); }} onNotify={notify} />}

@@ -10,7 +10,33 @@ test('pulls named fenced files out of AI answers without destroying edited files
   assert.deepEqual(generated.map((item) => item.name), ['index-2.html', 'style.css']);
   assert.equal(mergeGeneratedFiles(existing, generated)[0].content, 'My work');
   const starter = [file('index.html', 'Starter', 'starter')];
-  assert.equal(mergeGeneratedFiles(starter, extractCodeFiles('```html filename="index.html"\n<h1>New</h1>\n```', starter))[0].content, '<h1>New</h1>');
+  const replacedStarter = mergeGeneratedFiles(starter, extractCodeFiles('```html filename="index.html"\n<h1>New</h1>\n```', starter))[0];
+  assert.equal(replacedStarter.content, '<h1>New</h1>');
+  assert.equal(replacedStarter.previousContent, 'Starter');
+  const newFile = extractCodeFiles('```python filename="tool.py"\nprint("hello")\n```', [])[0];
+  assert.equal(newFile.previousContent, '');
+  assert.equal(newFile.lastChangedBy, 'ai');
+});
+
+test('AI edits only the explicitly attached unchanged Canvas file and preserves a diff baseline', () => {
+  const existing = [file('src/App.tsx', 'const value = 1;', 'user')];
+  const target = { id: existing[0].id, name: existing[0].name, content: existing[0].content };
+  const markdown = '```tsx filename="src/App.tsx"\nconst value = 2;\n```';
+  const edited = extractCodeFiles(markdown, existing, [target]);
+  assert.equal(edited.length, 1);
+  assert.equal(edited[0].id, existing[0].id);
+  assert.equal(edited[0].name, 'src/App.tsx');
+  assert.equal(edited[0].previousContent, 'const value = 1;');
+  assert.equal(edited[0].lastChangedBy, 'ai');
+  const merged = mergeGeneratedFiles(existing, edited);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].content, 'const value = 2;');
+
+  const changedSinceAttach = [{ ...existing[0], content: 'const value = 3;' }];
+  const version = extractCodeFiles(markdown, changedSinceAttach, [target]);
+  assert.equal(version[0].name, 'src/App-2.tsx');
+  assert.equal(mergeGeneratedFiles(changedSinceAttach, version)[0].content, 'const value = 3;');
+  assert.equal(mergeGeneratedFiles(changedSinceAttach, version)[1].content, 'const value = 2;');
 });
 
 test('sanitizes file names and infers snippet extensions', () => {

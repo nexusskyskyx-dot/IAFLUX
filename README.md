@@ -79,7 +79,7 @@ Every chat request sends a **server-owned system instruction** to the selected m
 ## What you can do
 
 - **Chat and code** with streamed answers, Markdown, optional live web search with source links, code blocks, model switching, copy actions, and a persistent local conversation history.
-- **Build in Canvas** using an editable syntax-highlighted CodeMirror editor. Named fenced code blocks (for example, one marked `html filename="index.html"`) from an AI answer become files automatically. Edited files are versioned rather than silently overwritten by a later answer.
+- **Build in Canvas** with **View**, **Edit**, **Test**, and **Diff** modes. Ask the AI to edit a file by clicking **Edit with AI**, then describe the change; AIFLUX updates only that explicitly attached file if it has not changed since it was shared. The Diff view shows additions in green and deletions in red, with an option to restore the previous version. Filename collisions with existing user-edited or AI-generated files create a separate version unless that exact Canvas file was attached for editing, preserving existing work. Test renders HTML/SVG in an isolated sandbox; it is not a shell or unit-test runner. Named fenced code blocks (for example, `html filename="index.html"`) still create new Canvas files automatically.
 - **Publish GitHub changes** from Canvas after reviewing selected file contents: create a draft pull request on a new branch by default, or explicitly confirm a direct push to an existing branch. No writes happen automatically; issues are not edited.
 - **Preview safely**: HTML or SVG projects can be previewed in a sandboxed iframe. Separate `.css` and `.js` files are included in the preview; external network requests are blocked. This is a web preview, **not** an unrestricted code execution environment or a React/TypeScript compiler.
 - **Bring context** by attaching up to three text/code files (30 KB each), adding a Canvas file, or selecting an installed GitHub repository file/issue/pull request for your next message. Export the current file, download the whole Canvas as a ZIP, or export a conversation as Markdown.
@@ -120,8 +120,9 @@ If you use a shared `OPENROUTER_API_KEY`, `XKIRO_API_KEY`, `GEMINI_API_KEY`, `GR
 ### Project structure
 
 ```text
-src/                 React UI, Canvas, model library, local workspace state
-src/lib/             file parsing, preview builder, streaming client, storage
+src/                 React UI, Canvas modes, model library, local workspace state
+src/components/CanvasDiff.tsx  colored, line-numbered Canvas change review
+src/lib/             file parsing, Canvas diffing, preview builder, streaming client, storage
 api/*.js             Vercel serverless entrypoints for the same API
 server/api-app.mjs   Shared Express API routes
 server/github.mjs    GitHub App OAuth, encrypted sessions, context reads, and confirmed publishing
