@@ -68,3 +68,25 @@ test('the preview sandbox allows web fonts but nothing that can phone home', asy
   assert.match(csp, /form-action 'none'/);
   assert.match(csp, /base-uri 'none'/);
 });
+
+test('the preview says so when the sandbox refuses something', () => {
+  // A CDN framework tag is the most common shape of a generated page and the
+  // most common cause of one that renders as plain HTML: the CSP refuses it
+  // and nothing at all is said. The model cannot see the preview, so if the
+  // page does not report it, nobody does.
+  const preview = buildPreview([{ name: 'index.html', content: '<html><head></head><body><h1>Hi</h1></body></html>' }]);
+  assert.match(preview, /securitypolicyviolation/, 'listens for refusals');
+  assert.match(preview, /Preview sandbox blocked/, 'and says what was refused');
+  assert.match(preview, /unstyled HTML/, 'naming the symptom this produces');
+  // Registered before the page's own tags, or the first refusal is missed.
+  const head = preview.slice(preview.indexOf('<head'), preview.indexOf('</head>'));
+  assert.ok(head.includes('securitypolicyviolation'), 'the listener is in the head, so it is registered in time');
+});
+
+test('the blocked-resource notice is in every preview, fragment or full document', () => {
+  for (const content of ['<h1>Hi</h1>', '<html><head><title>T</title></head><body>Hi</body></html>']) {
+    const preview = buildPreview([{ name: 'a.html', content }]);
+    assert.match(preview, /securitypolicyviolation/, content);
+    assert.match(preview, /Content-Security-Policy/, 'and the policy still applies');
+  }
+});

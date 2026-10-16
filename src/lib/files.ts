@@ -189,6 +189,45 @@ export function mergeGeneratedFiles(existing: WorkspaceFile[], generated: Worksp
  * and forbidding it condemned every result to the system font stack, which
  * reads as generic no matter how good the layout is.
  */
+/**
+ * Reports what the sandbox refused, in the page itself.
+ *
+ * The CSP is right to refuse a CDN stylesheet, but the refusal used to be
+ * silent: the tag simply does not load and the page renders with no styles at
+ * all — which is indistinguishable from a model that wrote no CSS. Worse, the
+ * most common way to write a landing page is a Tailwind CDN script tag, so the
+ * failure was both near-certain and invisible. Saying so in the page turns
+ * "why does my output look like plain HTML" into something with a cause and a
+ * fix, and it is the one thing the model cannot do for itself: it cannot see
+ * the preview.
+ */
+const BLOCKED_REPORTER = `<script>
+(function () {
+  var verbs = { 'script-src': 'scripts', 'style-src': 'stylesheets', 'img-src': 'images', 'font-src': 'fonts', 'connect-src': 'network requests', 'default-src': 'resources' };
+  var blocked = [];
+  document.addEventListener('securitypolicyviolation', function (event) {
+    var uri = event.blockedURI || '';
+    var host = uri.replace(/^[a-z]+:\/\//i, '').split('/')[0] || uri || 'the page';
+    var key = event.directive + '|' + host;
+    for (var i = 0; i < blocked.length; i += 1) if (blocked[i].key === key) return;
+    blocked.push({ key: key, what: verbs[event.directive] || event.directive, host: host });
+    draw();
+  }, true);
+  function draw() {
+    var box = document.getElementById('aiflux-blocked-notice');
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'aiflux-blocked-notice';
+      box.setAttribute('role', 'status');
+      box.style.cssText = 'position:fixed;z-index:2147483647;left:0;right:0;top:0;margin:0;padding:10px 14px;background:#7f1d1d;color:#fff;font:13px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;box-shadow:0 2px 12px rgba(0,0,0,.4)';
+      (document.body || document.documentElement).appendChild(box);
+    }
+    var list = blocked.map(function (entry) { return entry.what + ' from ' + entry.host; }).join('; ');
+    box.textContent = 'Preview sandbox blocked ' + list + '. The page is rendering WITHOUT them, so a page built on a CDN stylesheet shows up as unstyled HTML. Put styles in a <style> block or a local .css file, and build images from inline SVG or a data: URL.';
+  }
+})();
+<\/script>`;
+
 const CSP = `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https://fonts.googleapis.com; img-src data: blob:; font-src data: https://fonts.gstatic.com; connect-src 'none'; form-action 'none'; base-uri 'none'`;
 
 export function buildPreview(files: WorkspaceFile[]): string | null {
@@ -199,8 +238,10 @@ export function buildPreview(files: WorkspaceFile[]): string | null {
   // Wrap HTML fragments as a real document so the restrictive CSP is always applied.
   if (!/<html\b/i.test(document)) document = `<!doctype html><html><head></head><body>${document}</body></html>`;
   const meta = `<meta http-equiv="Content-Security-Policy" content="${CSP}">`;
-  if (/<head\b[^>]*>/i.test(document)) document = document.replace(/<head\b[^>]*>/i, (opening) => `${opening}${meta}`);
-  else document = document.replace(/<html\b[^>]*>/i, (opening) => `${opening}<head>${meta}</head>`);
+  // The reporter goes in before anything else in the head so its listener is
+  // registered before the first blocked request is made.
+  if (/<head\b[^>]*>/i.test(document)) document = document.replace(/<head\b[^>]*>/i, (opening) => `${opening}${meta}${BLOCKED_REPORTER}`);
+  else document = document.replace(/<html\b[^>]*>/i, (opening) => `${opening}<head>${meta}${BLOCKED_REPORTER}</head>`);
   const css = files.filter((file) => /\.css$/i.test(file.name)).map((file) => file.content.replace(/<\/style/gi, '<\\/style')).join('\n');
   const js = files.filter((file) => /\.js$/i.test(file.name)).map((file) => file.content.replace(/<\/script/gi, '<\\/script')).join('\n');
   // Pass a replacer function: CSS/JS containing `$&` or `$1` would otherwise be

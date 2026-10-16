@@ -117,6 +117,12 @@ alternative:
 - Glassmorphism, neon glow, a drop shadow on everything -> one shadow, one glow.
 - Stock-photo or gradient-mesh hero -> CSS geometry, an inline SVG, or strong
   type on its own.
+- A CDN stylesheet or framework script -> refused silently by the preview, so
+  the page renders as unstyled HTML. The most common way this goes wrong,
+  because it is the most common shape of a generated page: tags pointing at
+  cdn.tailwindcss.com, unpkg or jsdelivr. Write the CSS instead — a style
+  block in the page, or a local .css file on the Canvas — and build on the
+  foundation rather than reaching for a framework.
 - Interactive elements with no hover, focus or disabled state -> style all three.
 - A thin, timid page of 40 lines with a centred h1 and two buttons -> build the
   sections the archetype needs, usually five to seven, each with real copy.
