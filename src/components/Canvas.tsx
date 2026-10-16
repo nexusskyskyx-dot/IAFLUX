@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDownToLine, ArrowUpRight, Check, Code2, Copy, Eye, FileCode2, FileDiff, FilePlus2, Files, FolderOpen, Github, Globe2, MoreHorizontal, Play, Plus, RefreshCw, Trash2, X } from 'lucide-react';
-import type { Conversation, WorkspaceFile } from '../types';
-import { buildPreview, downloadFile, downloadProject, fileColor, fileLanguage, safeFilename } from '../lib/files';
+import { ArrowDownToLine, Check, Code2, Copy, Eye, FileCode2, FileDiff, FilePlus2, Files, Folder, FolderOpen, Github, Globe2, MoreHorizontal, Play, Plus, RefreshCw, Trash2, Undo2, X } from 'lucide-react';
+import type { Conversation } from '../types';
+import { buildPreview, downloadFile, downloadProject, expandFolderPaths, fileColor, fileLanguage, inferFolderPaths, safeFilename } from '../lib/files';
 import CanvasDiff from './CanvasDiff';
 
 interface Props {
@@ -12,8 +12,11 @@ interface Props {
   onUpdateFile: (id: string, content: string) => void;
   onRestoreFile: (id: string) => void;
   onCreateFile: (name: string, content?: string) => void;
+  onCreateFolder: (path: string) => void;
   onDeleteFile: (id: string) => void;
-  onAddContext: (file: WorkspaceFile) => void;
+  onDeleteFolder: (path: string) => void;
+  onRestoreDeletedFile: (id: string) => void;
+  onRestoreDeletedFolder: (path: string) => void;
   onNotify: (message: string) => void;
   onPublishGitHub: () => void;
 }
@@ -26,12 +29,17 @@ export default function Canvas(props: Props) {
   const [mode, setMode] = useState<CanvasMode>('edit');
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   const [refresh, setRefresh] = useState(0);
   const [remoteImagesAllowed, setRemoteImagesAllowed] = useState(false);
   const [copied, setCopied] = useState(false);
   const importRef = useRef<HTMLInputElement>(null);
   const file = props.conversation.files.find((item) => item.id === props.conversation.selectedFileId) || props.conversation.files[0];
+  const folders = useMemo(() => expandFolderPaths([...(props.conversation.folders || []), ...inferFolderPaths(props.conversation.files)]), [props.conversation.files, props.conversation.folders]);
+  const deletedFiles = props.conversation.deletedFiles || [];
+  const deletedFolders = props.conversation.deletedFolders || [];
   const preview = useMemo(() => buildPreview(props.conversation.files, { allowRemoteImages: remoteImagesAllowed }), [props.conversation.files, remoteImagesAllowed]);
   const lineCount = file?.content.split('\n').length || 0;
 
@@ -43,9 +51,17 @@ export default function Canvas(props: Props) {
   const addFile = () => {
     const name = safeFilename(newName);
     if (!newName.trim() || name === 'snippet.txt' && newName.trim() !== 'snippet.txt') { props.onNotify('Enter a valid file name.'); return; }
-    if (props.conversation.files.some((item) => item.name === name)) { props.onNotify('A file with that name already exists.'); return; }
+    if (props.conversation.files.some((item) => item.name === name || name.startsWith(`${item.name}/`) || item.name.startsWith(`${name}/`)) || folders.includes(name)) { props.onNotify('A file or folder with that path already exists.'); return; }
     props.onCreateFile(name);
     setNewName(''); setCreating(false); setMode('edit');
+  };
+
+  const addFolder = () => {
+    const path = safeFilename(newFolderName);
+    if (!newFolderName.trim() || path === 'snippet.txt' && newFolderName.trim() !== 'snippet.txt') { props.onNotify('Enter a valid folder name.'); return; }
+    if (folders.includes(path) || props.conversation.files.some((item) => item.name === path)) { props.onNotify('A file or folder with that name already exists.'); return; }
+    props.onCreateFolder(path);
+    setNewFolderName(''); setCreatingFolder(false);
   };
 
   const importFiles = async (files: FileList | null) => {
@@ -83,28 +99,44 @@ export default function Canvas(props: Props) {
 
     <div className="canvas-file-area">
       <div className="canvas-file-title">
-        <span><FolderOpen size={15} /> FILES <span className="canvas-file-count">{String(props.conversation.files.length).padStart(2, '0')}</span></span>
+        <span><FolderOpen size={15} /> FILES <span className="canvas-file-count">{String(props.conversation.files.length).padStart(2, '0')} · {folders.length} DIR</span></span>
         <div>
           <input ref={importRef} type="file" hidden multiple accept=".html,.css,.js,.jsx,.ts,.tsx,.json,.md,.txt,.py,.svg,.xml,.sh,.yaml,.yml,.sql,.rs,.go,.java" onChange={(event) => void importFiles(event.target.files)} />
           <button className="subtle-icon" onClick={props.onPublishGitHub} title="Review and publish Canvas files to GitHub" aria-label="Review and publish Canvas files to GitHub"><Github size={16} /></button>
-          <button className="subtle-icon" onClick={() => setCreating(true)} title="New file" aria-label="New file"><Plus size={17} /></button>
+          <button className="subtle-icon" onClick={() => { setCreating(true); setCreatingFolder(false); }} title="New file" aria-label="New file"><Plus size={17} /></button>
           <div className="canvas-menu-anchor">
             <button className="subtle-icon" onClick={() => setMenuOpen(!menuOpen)} title="More file actions" aria-label="More file actions"><MoreHorizontal size={17} /></button>
             {menuOpen && <div className="canvas-dropdown">
-              <button onClick={() => { setCreating(true); setMenuOpen(false); }}><FilePlus2 size={14} /> New file</button>
+              <button onClick={() => { setCreating(true); setCreatingFolder(false); setMenuOpen(false); }}><FilePlus2 size={14} /> New file</button>
+              <button onClick={() => { setCreatingFolder(true); setCreating(false); setMenuOpen(false); }}><Folder size={14} /> New folder</button>
               <button onClick={() => importRef.current?.click()}><FolderOpen size={14} /> Import files</button>
-              <button onClick={() => { void downloadProject(props.conversation.files).catch(() => props.onNotify('Could not export project.')); setMenuOpen(false); }} disabled={!props.conversation.files.length}><ArrowDownToLine size={14} /> Download project .zip</button>
+              <button onClick={() => { void downloadProject(props.conversation.files, folders).catch(() => props.onNotify('Could not export project.')); setMenuOpen(false); }} disabled={!props.conversation.files.length && !folders.length}><ArrowDownToLine size={14} /> Download project .zip</button>
             </div>}
           </div>
         </div>
       </div>
 
       {creating && <div className="canvas-create"><FilePlus2 size={15} /><input autoFocus value={newName} onChange={(event) => setNewName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') addFile(); if (event.key === 'Escape') setCreating(false); }} placeholder="filename.ext" aria-label="New file name" /><button onClick={addFile} aria-label="Create file"><Check size={15} /></button><button onClick={() => setCreating(false)} aria-label="Cancel"><X size={15} /></button></div>}
+      {creatingFolder && <div className="canvas-create"><Folder size={15} /><input autoFocus value={newFolderName} onChange={(event) => setNewFolderName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') addFolder(); if (event.key === 'Escape') setCreatingFolder(false); }} placeholder="folder/name" aria-label="New folder name" /><button onClick={addFolder} aria-label="Create folder"><Check size={15} /></button><button onClick={() => setCreatingFolder(false)} aria-label="Cancel"><X size={15} /></button></div>}
 
-      <div className="canvas-files">{props.conversation.files.length ? props.conversation.files.map((item) => <div key={item.id} className={`canvas-file ${file?.id === item.id ? 'active' : ''}`}>
-        <button onClick={() => { props.onSelectFile(item.id); setMode(item.lastChangedBy === 'ai' && item.previousContent !== undefined ? 'diff' : 'edit'); }} title={item.name}><span className={`file-type-dot file-${fileColor(item.name)}`} /><span className="canvas-file-name">{item.name}</span>{item.origin === 'generated' && <span className="file-ai-tag">AI</span>}</button>
-        <button className="canvas-file-delete" onClick={() => { if (window.confirm(`Delete ${item.name} from this workspace?`)) props.onDeleteFile(item.id); }} title={`Delete ${item.name}`} aria-label={`Delete ${item.name}`}><Trash2 size={13} /></button>
-      </div>) : <div className="canvas-no-files">No files yet. Create one to get started.</div>}</div>
+      <div className="canvas-files">
+        {folders.map((folder) => <div key={`folder-${folder}`} className="canvas-file canvas-folder">
+          <button type="button" title={`Create a file inside ${folder}/`} onClick={() => { setNewName(`${folder}/`); setCreating(true); setCreatingFolder(false); }}><Folder size={15} /><span className="canvas-file-name">{folder}/</span><span className="file-ai-tag">DIR</span></button>
+          <button className="canvas-file-delete" onClick={() => { if (window.confirm(`Move folder ${folder}/ and its contents to Recently deleted?`)) props.onDeleteFolder(folder); }} title={`Delete folder ${folder}`} aria-label={`Delete folder ${folder}`}><Trash2 size={13} /></button>
+        </div>)}
+        {props.conversation.files.map((item) => <div key={item.id} className={`canvas-file ${file?.id === item.id ? 'active' : ''}`}>
+          <button onClick={() => { props.onSelectFile(item.id); setMode(item.lastChangedBy === 'ai' && item.previousContent !== undefined ? 'diff' : 'edit'); }} title={item.name}><span className={`file-type-dot file-${fileColor(item.name)}`} /><span className="canvas-file-name">{item.name}</span>{item.origin === 'generated' && <span className="file-ai-tag">AI</span>}</button>
+          <button className="canvas-file-delete" onClick={() => { if (window.confirm(`Move ${item.name} to Recently deleted?`)) props.onDeleteFile(item.id); }} title={`Move ${item.name} to Recently deleted`} aria-label={`Delete ${item.name}`}><Trash2 size={13} /></button>
+        </div>)}
+        {!props.conversation.files.length && !folders.length && <div className="canvas-no-files">No files yet. Ask AIFLUX to create one or use the + button.</div>}
+      </div>
+      {(deletedFiles.length > 0 || deletedFolders.length > 0) && <details className="canvas-trash">
+        <summary><Trash2 size={13} /> Recently deleted <span>{deletedFiles.length + deletedFolders.length}</span></summary>
+        <div className="canvas-trash-list">
+          {deletedFolders.map((folder) => <div key={`deleted-folder-${folder}`}><span><Folder size={13} /> {folder}/</span><button onClick={() => props.onRestoreDeletedFolder(folder)} title={`Restore folder ${folder}`}><Undo2 size={12} /> Restore</button></div>)}
+          {deletedFiles.map((item) => <div key={`deleted-file-${item.id}`}><span><FileCode2 size={13} /> {item.name}</span><button onClick={() => props.onRestoreDeletedFile(item.id)} title={`Restore ${item.name}`}><Undo2 size={12} /> Restore</button></div>)}
+        </div>
+      </details>}
     </div>
 
     <div className="canvas-editor-tabs">
@@ -138,7 +170,7 @@ export default function Canvas(props: Props) {
         {mode === 'test' ? 'SAFE SANDBOX TEST' : mode === 'diff' ? 'DIFF · GREEN ADDED / RED DELETED' : file ? `${mode === 'view' ? 'READ-ONLY' : fileLanguage(file.name).toUpperCase()}  ·  ${lineCount} LINES` : 'NO FILE SELECTED'}
         <span className="canvas-bottom-right">AUTOSAVED LOCALLY</span>
       </div>
-      {file && mode !== 'test' && <button className="canvas-context-button" title={`Send the full ${file.name} contents to AIFLUX so it can read and edit this file`} onClick={() => props.onAddContext(file)}><span><FileCode2 size={15} /> Edit {file.name.split('/').at(-1)} with AI</span><ArrowUpRight size={16} /></button>}
+      <div className="canvas-context-status" title="Every chat message automatically includes the current Canvas file tree and source code, subject to the model context limit."><span><Files size={13} /> FULL CANVAS AUTO-SHARED · {props.conversation.files.length} {props.conversation.files.length === 1 ? 'FILE' : 'FILES'} · {folders.length} {folders.length === 1 ? 'FOLDER' : 'FOLDERS'}</span><small>AIFLUX receives the current workspace with each message, within context limits.</small></div>
       {mode === 'test' && <div className="preview-test-controls">
         <button type="button" className={remoteImagesAllowed ? 'remote-images-enabled' : ''} aria-pressed={remoteImagesAllowed} onClick={() => { setRemoteImagesAllowed((allowed) => !allowed); setRefresh((value) => value + 1); }} title="Allow only HTTPS image requests; the image host may see your IP address."><Globe2 size={13} /> Remote images {remoteImagesAllowed ? 'ON' : 'OFF'}</button>
         <span>{remoteImagesAllowed ? 'HTTPS images are enabled; hosts may see your IP. External scripts, fetch, and forms remain blocked.' : 'Off by default. Enable to load HTTPS images; inline/data images work without it.'}</span>

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDownToLine, Check, ChevronRight, Code2, KeyRound, Menu, PanelRightOpen } from 'lucide-react';
 import type { AppConfig, AttachedFile, ChatMessage, Conversation, Credentials, KeyProvider, ModelInfo, Provider, SearchMode, WorkspaceFile } from './types';
 import { CURATED_MODELS, DEFAULT_MODEL, PROVIDERS, recommendedModelForProvider } from './lib/models';
-import { createDraft, downloadConversation, extractCodeFiles, mergeGeneratedFiles, toProviderMessages } from './lib/files';
+import { applyWorkspaceOperations, buildCanvasContext, createDraft, downloadConversation, expandFolderPaths, extractCodeFiles, extractWorkspaceOperations, filterWorkspaceOperationsForRequest, inferFolderPaths, MAX_CANVAS_CONTEXT_CHARS, mergeGeneratedFiles, requestsCanvasMutation, toProviderMessages } from './lib/files';
 import { hasSavedModel, loadActiveId, loadConversations, loadCredentials, loadModel, loadSearchMode, saveActiveId, saveConversations, saveCredentials, saveModel, saveSearchMode } from './lib/storage';
 import { isUsableFreeCatalogModel } from './lib/model-policy.mjs';
 import { requestChat } from './lib/chat';
@@ -340,10 +340,22 @@ export default function App() {
     if (config.requiresAccessCode && !credentials.accessCode) { openSettings(); notify('Enter your workspace access code first.'); return false; }
     const now = Date.now();
     const chatId = activeChat.id;
-    const userMessage: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: text, createdAt: now, attachments };
+    const userRequestText = text;
+    const userMessage: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: userRequestText, createdAt: now, attachments };
+    const canvasMutationRequested = requestsCanvasMutation(userRequestText);
+    const attachmentChars = attachments.reduce((total, file) => total + file.content.length, 0);
+    const canvasBudget = Math.max(1_000, Math.min(MAX_CANVAS_CONTEXT_CHARS, 155_000 - text.length - attachmentChars - attachments.length * 200));
+    const canvasContext = buildCanvasContext(activeChat.files, activeChat.folders || [], activeChat.selectedFileId, canvasBudget);
     const assistantId = crypto.randomUUID();
     const assistantMessage: ChatMessage = { id: assistantId, role: 'assistant', content: '', createdAt: now, status: 'streaming', model: selectedModel.name, ...(searchMode !== 'off' ? { searchStatus: 'planning' } : {}) };
-    const history = toProviderMessages([...activeChat.messages, userMessage]);
+    const history = toProviderMessages([...activeChat.messages, userMessage], canvasContext.text);
+    if (canvasContext.truncatedFiles.length || canvasContext.manifestTruncated) {
+      const omitted = canvasContext.truncatedFiles.slice(0, 4).join(', ');
+      const contentNote = canvasContext.truncatedFiles.length
+        ? `full contents sent for ${canvasContext.editableFiles.length}/${activeChat.files.length} files; some were truncated or omitted (${omitted}${canvasContext.truncatedFiles.length > 4 ? ', …' : ''})`
+        : 'some file or folder paths were omitted from the oversized manifest';
+      notify(`Canvas context limit: ${contentNote}.`);
+    }
     if (history.reduce((sum, message) => sum + message.content.length, 0) > 180_000) { notify('This message is too long. Remove an attachment or shorten it.'); return false; }
     const updated: Conversation = {
       ...activeChat, title: activeChat.messages.length === 0 ? text.replace(/\s+/g, ' ').slice(0, 53) + (text.length > 53 ? '…' : '') : activeChat.title,
@@ -388,28 +400,44 @@ export default function App() {
       },
     }).then(() => {
       const text = responseText;
-      const editableTargets = userMessage.attachments?.flatMap((attachment) =>
-        attachment.canvasFileId ? [{ id: attachment.canvasFileId, name: attachment.name, content: attachment.content }] : [],
-      ) || [];
-      const latestFiles = chatsRef.current.find((chat) => chat.id === chatId)?.files || updated.files;
-      const contextEdit = extractCodeFiles(text, latestFiles, editableTargets).find((generated) =>
-        editableTargets.some((target) => target.id === generated.id),
+      const editableTargetMap = new Map((canvasMutationRequested ? canvasContext.editableFiles : []).map((target) => [target.id, target]));
+      for (const attachment of userMessage.attachments || []) {
+        if (canvasMutationRequested && attachment.canvasFileId && !editableTargetMap.has(attachment.canvasFileId)) {
+          editableTargetMap.set(attachment.canvasFileId, { id: attachment.canvasFileId, name: attachment.name, content: attachment.content });
+        }
+      }
+      const editableTargets = [...editableTargetMap.values()];
+      const workspaceOperations = filterWorkspaceOperationsForRequest(extractWorkspaceOperations(text), userRequestText);
+      const latestConversation = chatsRef.current.find((chat) => chat.id === chatId) || updated;
+      const latestGenerated = extractCodeFiles(text, latestConversation.files, editableTargets, canvasMutationRequested);
+      const latestMerged = mergeGeneratedFiles(latestConversation.files, latestGenerated);
+      const latestMutation = applyWorkspaceOperations(
+        latestMerged, latestConversation.folders || [], latestConversation.deletedFiles || [], latestConversation.deletedFolders || [], workspaceOperations,
       );
-      if (contextEdit) setContextFile((current) => current?.canvasFileId === contextEdit.id
-        ? { ...current, content: contextEdit.content }
-        : current);
-      const count = extractCodeFiles(text, updated.files, editableTargets).length;
+      setContextFile((current) => {
+        if (!current?.canvasFileId) return current;
+        const refreshed = latestMutation.files.find((file) => file.id === current.canvasFileId);
+        return refreshed ? { ...current, name: refreshed.name, content: refreshed.content } : null;
+      });
+      const count = latestGenerated.length;
       setChats((previous) => previous.map((chat) => {
         if (chat.id !== chatId) return chat;
-        const generated = extractCodeFiles(text, chat.files, editableTargets);
-        const files = mergeGeneratedFiles(chat.files, generated);
+        const generated = extractCodeFiles(text, chat.files, editableTargets, canvasMutationRequested);
+        const merged = mergeGeneratedFiles(chat.files, generated);
+        const mutation = applyWorkspaceOperations(merged, chat.folders || [], chat.deletedFiles || [], chat.deletedFolders || [], workspaceOperations);
+        const selectedFileId = generated[0] && mutation.files.some((file) => file.id === generated[0].id)
+          ? generated[0].id
+          : mutation.files.some((file) => file.id === chat.selectedFileId) ? chat.selectedFileId : mutation.files[0]?.id || null;
         return {
-          ...chat, updatedAt: Date.now(), files,
-          selectedFileId: generated[0]?.id || chat.selectedFileId,
+          ...chat, updatedAt: Date.now(), files: mutation.files, folders: mutation.folders,
+          deletedFiles: mutation.deletedFiles, deletedFolders: mutation.deletedFolders, selectedFileId,
           messages: chat.messages.map((message) => message.id === assistantId ? { ...message, content: text, status: 'done', model: actualModel, searchStatus: undefined, searchQuery: undefined } : message),
         };
       }));
-      if (count) notify(`${count} ${count === 1 ? 'file change' : 'file changes'} applied to Canvas`);
+      const appliedSummary = [...(count ? [`${count} file ${count === 1 ? 'change' : 'changes'}`] : []), ...latestMutation.applied];
+      if (appliedSummary.length || latestMutation.skipped.length) {
+        notify([...appliedSummary, ...latestMutation.skipped].join(' · '));
+      }
     }).catch((error: unknown) => {
       const aborted = controller.signal.aborted;
       const message = error instanceof Error ? error.message : 'Something went wrong.';
@@ -440,34 +468,83 @@ export default function App() {
   };
   const createFile = (name: string, content = '') => {
     const file: WorkspaceFile = { id: crypto.randomUUID(), name, content, origin: 'user', previousContent: content, lastChangedBy: 'user' };
-    updateActive((chat) => ({ ...chat, updatedAt: Date.now(), files: [...chat.files, file], selectedFileId: file.id }));
+    updateActive((chat) => {
+      const files = [...chat.files, file];
+      return { ...chat, updatedAt: Date.now(), files, folders: expandFolderPaths([...(chat.folders || []), ...inferFolderPaths(files)]), selectedFileId: file.id };
+    });
     notify(`${name} added to Canvas`);
+  };
+  const createFolder = (path: string) => {
+    const result = applyWorkspaceOperations(activeChat.files, activeChat.folders || [], activeChat.deletedFiles || [], activeChat.deletedFolders || [], [{ type: 'create-folder', path }]);
+    if (!result.applied.length) { notify(result.skipped[0] || `Could not create ${path}/`); return; }
+    updateActive((chat) => ({ ...chat, updatedAt: Date.now(), folders: result.folders }));
+    notify(result.applied[0]);
   };
   const deleteFile = (id: string) => {
     if (contextFile?.canvasFileId === id) setContextFile(null);
     updateActive((chat) => {
-      const files = chat.files.filter((file) => file.id !== id);
-      return { ...chat, updatedAt: Date.now(), files, selectedFileId: chat.selectedFileId === id ? files[0]?.id || null : chat.selectedFileId };
+      const file = chat.files.find((item) => item.id === id);
+      if (!file) return chat;
+      const files = chat.files.filter((item) => item.id !== id);
+      return {
+        ...chat, updatedAt: Date.now(), files,
+        deletedFiles: [...(chat.deletedFiles || []).filter((item) => item.id !== id), file],
+        selectedFileId: chat.selectedFileId === id ? files[0]?.id || null : chat.selectedFileId,
+      };
     });
-    notify('File deleted');
+    notify('Moved to Recently deleted. You can restore it from the Canvas file list.');
   };
-  const addContext = (file: WorkspaceFile) => {
-    const canApplyCanvasEdit = file.content.length <= 100_000;
-    setContextFile({
-      name: file.name, content: canApplyCanvasEdit ? file.content : file.content.slice(0, 30_000),
-      ...(canApplyCanvasEdit ? { canvasFileId: file.id } : { canvasPartial: true }),
+  const deleteFolder = (path: string) => {
+    const attachedName = contextFile?.canvasFileId && activeChat.files.find((file) => file.id === contextFile.canvasFileId)?.name;
+    if (attachedName && (attachedName === path || attachedName.startsWith(`${path}/`))) setContextFile(null);
+    const result = applyWorkspaceOperations(activeChat.files, activeChat.folders || [], activeChat.deletedFiles || [], activeChat.deletedFolders || [], [{ type: 'delete-folder', path }]);
+    if (!result.applied.length) { notify(result.skipped[0] || `Could not delete ${path}/`); return; }
+    updateActive((chat) => ({ ...chat, updatedAt: Date.now(), files: result.files, folders: result.folders, deletedFiles: result.deletedFiles, deletedFolders: result.deletedFolders, selectedFileId: result.files.some((file) => file.id === chat.selectedFileId) ? chat.selectedFileId : result.files[0]?.id || null }));
+    notify(result.applied[0]);
+  };
+  const restoreDeletedFile = (id: string) => {
+    const deleted = activeChat.deletedFiles?.find((item) => item.id === id);
+    if (!deleted) return;
+    const activeFolders = expandFolderPaths([...(activeChat.folders || []), ...inferFolderPaths(activeChat.files)]);
+    const fileConflict = activeChat.files.some((item) => item.name === deleted.name || deleted.name.startsWith(`${item.name}/`) || item.name.startsWith(`${deleted.name}/`));
+    if (fileConflict || activeFolders.includes(deleted.name)) { notify(`Cannot restore ${deleted.name}: a file or folder conflicts with that path.`); return; }
+    updateActive((chat) => {
+      const file = chat.deletedFiles?.find((item) => item.id === id);
+      if (!file) return chat;
+      const files = [...chat.files, file];
+      const parentFolders = inferFolderPaths([file]);
+      return {
+        ...chat, updatedAt: Date.now(), files,
+        folders: expandFolderPaths([...(chat.folders || []), ...parentFolders]),
+        deletedFiles: (chat.deletedFiles || []).filter((item) => item.id !== id),
+        deletedFolders: (chat.deletedFolders || []).filter((folder) => !parentFolders.includes(folder)),
+        selectedFileId: id,
+      };
     });
-    if (!canApplyCanvasEdit) notify(`AIFLUX can see the first 30 KB of ${file.name}, but not its full contents. Split or reduce the file for a safe full-file edit.`);
-    else notify(`AIFLUX can now see ${file.name}. Describe a change and send; this Canvas attachment stays active until you remove it.`);
-    setMobileCanvasOpen(false);
-    setView('studio');
+    notify('File restored to Canvas');
+  };
+  const restoreDeletedFolder = (path: string) => {
+    const activeFolders = expandFolderPaths([...(activeChat.folders || []), ...inferFolderPaths(activeChat.files)]);
+    if (activeFolders.includes(path)) {
+      updateActive((chat) => ({ ...chat, updatedAt: Date.now(), deletedFolders: (chat.deletedFolders || []).filter((folder) => folder !== path) }));
+      notify(`Folder ${path}/ already exists; cleared its stale Recently deleted entry.`);
+      return;
+    }
+    const fileConflict = activeChat.files.some((file) => file.name === path || path.startsWith(`${file.name}/`) || file.name.startsWith(`${path}/`));
+    if (fileConflict) { notify(`Cannot restore ${path}/: a file conflicts with that path.`); return; }
+    const restoredPaths = new Set(expandFolderPaths([path]));
+    updateActive((chat) => ({ ...chat, updatedAt: Date.now(), folders: expandFolderPaths([...(chat.folders || []), path]), deletedFolders: (chat.deletedFolders || []).filter((folder) => !restoredPaths.has(folder)) }));
+    notify(`Folder ${path}/ restored`);
   };
   const openSnippet = (content: string, info: string) => {
     const existing = activeChat.files.find((file) => file.content.trim() === content.trim());
     if (existing) selectFile(existing.id);
     else {
       const generated = extractCodeFiles(`\`\`\`${info}\n${content}\n\`\`\``, activeChat.files);
-      if (generated.length) updateActive((chat) => ({ ...chat, files: mergeGeneratedFiles(chat.files, generated), selectedFileId: generated[0].id, updatedAt: Date.now() }));
+      if (generated.length) updateActive((chat) => {
+        const files = mergeGeneratedFiles(chat.files, generated);
+        return { ...chat, files, folders: expandFolderPaths([...(chat.folders || []), ...inferFolderPaths(files)]), selectedFileId: generated[0].id, updatedAt: Date.now() };
+      });
     }
     setView('studio');
     setCanvasVisible(true);
@@ -495,7 +572,7 @@ export default function App() {
         onNotify={notify} onSettings={() => openSettings()} onGitHub={() => setGithubOpen(true)} />
         : <ModelLibrary models={models} selected={selectedModel} catalogAvailable={freeCatalogAvailable} isConnected={isConnected} onSelect={chooseModel} onSettings={openSettings} onRefresh={() => void loadModels(true)} />}
     </main>
-    {(canvasVisible || mobileCanvasOpen) && <Canvas conversation={activeChat} mobileOpen={mobileCanvasOpen} onClose={closeCanvas} onSelectFile={selectFile} onUpdateFile={updateFile} onRestoreFile={restoreFile} onCreateFile={createFile} onDeleteFile={deleteFile} onAddContext={addContext} onNotify={notify} onPublishGitHub={() => setGithubPublishOpen(true)} />}
+    {(canvasVisible || mobileCanvasOpen) && <Canvas conversation={activeChat} mobileOpen={mobileCanvasOpen} onClose={closeCanvas} onSelectFile={selectFile} onUpdateFile={updateFile} onRestoreFile={restoreFile} onCreateFile={createFile} onCreateFolder={createFolder} onDeleteFile={deleteFile} onDeleteFolder={deleteFolder} onRestoreDeletedFile={restoreDeletedFile} onRestoreDeletedFolder={restoreDeletedFolder} onNotify={notify} onPublishGitHub={() => setGithubPublishOpen(true)} />}
     {mobileCanvasOpen && <button className="canvas-mobile-scrim" aria-label="Close Canvas" onClick={() => setMobileCanvasOpen(false)} />}
     {settingsOpen && <SettingsModal credentials={credentials} config={config} focusProvider={settingsProvider} onSave={saveSettings} onClose={() => setSettingsOpen(false)} />}
     {githubOpen && <GitHubContextModal onClose={() => setGithubOpen(false)} onUseContext={(file) => { setContextFile(file); setGithubOpen(false); notify(`${file.name} added as context for your next message.`); }} onNotify={notify} />}

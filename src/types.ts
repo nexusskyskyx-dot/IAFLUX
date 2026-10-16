@@ -60,6 +60,12 @@ export interface Conversation {
   updatedAt: number;
   messages: ChatMessage[];
   files: WorkspaceFile[];
+  /** Explicit (possibly empty) project folders; parent folders are inferred from file paths. */
+  folders?: string[];
+  /** Soft-deleted files kept locally so users can restore AI or manual deletions. */
+  deletedFiles?: WorkspaceFile[];
+  /** Soft-deleted empty folders kept locally so users can restore them. */
+  deletedFolders?: string[];
   selectedFileId: string | null;
 }
 

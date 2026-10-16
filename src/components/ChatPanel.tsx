@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ArrowRight, ArrowUpRight, Braces, Check, ChevronDown, Code2, Copy, FileCode2, Github, Globe2, Lightbulb, Paperclip, Send, Sparkles, Square, WandSparkles, X } from 'lucide-react';
+import { ArrowRight, ArrowUpRight, Braces, Check, ChevronDown, Code2, Copy, FileCode2, Files, Github, Globe2, Lightbulb, Paperclip, Send, Sparkles, Square, WandSparkles, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { AttachedFile, ChatMessage, Conversation, ModelInfo, Provider, SearchMode } from '../types';
@@ -47,6 +47,21 @@ function CodeBlock({ node, onOpenSnippet, onNotify }: { node: unknown; onOpenSni
   const language = code?.properties?.className?.join(' ')?.replace('language-', '') || 'code';
   const info = `${language} ${code?.data?.meta || ''}`.trim();
   const filename = info.match(/(?:filename|file|title)\s*=\s*["']?([^\s"']+)/i)?.[1];
+  if (language === 'aiflux-workspace') {
+    try {
+      const parsed = JSON.parse(content) as { operations?: { type?: string; path?: string; from?: string; to?: string }[] };
+      const operations = Array.isArray(parsed.operations) ? parsed.operations.filter((operation) => operation && typeof operation === 'object').slice(0, 30) : [];
+      if (operations.length) return <div className="workspace-operation-card"><strong><Files size={14} /> Canvas workspace actions</strong><ul>{operations.map((operation, index) => {
+        const label = operation.type === 'create-folder' ? `Create folder ${operation.path}/`
+          : operation.type === 'delete-folder' ? `Delete folder ${operation.path}/`
+            : operation.type === 'rename-folder' ? `Rename folder ${operation.from}/ to ${operation.to}/`
+              : operation.type === 'delete-file' ? `Delete file ${operation.path}`
+                : operation.type === 'rename-file' ? `Rename ${operation.from} to ${operation.to}`
+                  : `${operation.type || 'Workspace action'} ${operation.path || ''}`;
+        return <li key={`${operation.type}-${index}`}>{label}</li>;
+      })}</ul><small>Changes apply to Canvas only; deleted items can be restored.</small></div>;
+    } catch { /* Render invalid operation JSON as a regular code block for inspection. */ }
+  }
   return <div className="markdown-code-block"><div className="markdown-code-header"><span><FileCode2 size={14} />{filename || language}</span><div><button onClick={() => copyText(content, onNotify)} title="Copy code"><Copy size={13} /> Copy</button><button onClick={() => onOpenSnippet(content, info)} title="Open code in Canvas"><ArrowUpRight size={13} /> Open in Canvas</button></div></div><pre><code>{content}</code></pre></div>;
 }
 
@@ -162,7 +177,7 @@ export default function ChatPanel(props: Props) {
           {props.sending ? <button className="send-button stop-button" onClick={props.onStop} title="Stop generation" aria-label="Stop generation"><Square size={15} fill="currentColor" /></button> : <button className="send-button" onClick={send} disabled={!draft.trim()} title="Send message" aria-label="Send message"><Send size={17} strokeWidth={2} /></button>}
         </div>
       </div>
-      <div className="composer-hint"><span><span className="hint-star">✳</span> {props.searchMode === 'off' ? 'Context+ adds relevant design, coding & reasoning notes.' : props.searchMode === 'auto' ? 'Context+ plus live search for current topics.' : 'Context+ plus live web search each turn.'}</span><span>Enter to send <span className="hint-divider">·</span> Shift + Enter for a new line</span></div>
+      <div className="composer-hint"><span title="The current Canvas file tree and source are sent with each message, subject to the model context limit."><span className="hint-star">✳</span> Canvas auto-shared ({props.conversation.files.length} {props.conversation.files.length === 1 ? 'file' : 'files'}) · {props.searchMode === 'off' ? 'Context+ adds coding notes.' : props.searchMode === 'auto' ? 'Context+ plus live search when useful.' : 'Context+ plus live search every turn.'}</span><span>Enter to send <span className="hint-divider">·</span> Shift + Enter for a new line</span></div>
     </div></div>
   </div>;
 }

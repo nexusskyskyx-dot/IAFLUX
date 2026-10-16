@@ -33,8 +33,9 @@ test('the central capability profile covers shipped features and keeps identity 
   assert.match(prompt, /user selected the Gemini model gemini-2\.5-flash for this reply/);
   for (const feature of AIFLUX_FEATURES) assert.ok(prompt.includes(`- ${feature}`), `Feature missing from prompt: ${feature}`);
   assert.match(prompt, /Canvas files can be viewed, edited, safely tested as HTML\/SVG/);
-  assert.match(prompt, /explicitly attaches a Canvas file and asks for an edit/);
-  assert.match(prompt, /preserves the previous contents for review/);
+  assert.match(prompt, /Every chat turn automatically includes the current Canvas file\/folder tree and source code/);
+  assert.match(prompt, /aiflux-workspace.*JSON block/);
+  assert.match(prompt, /preserving the previous contents for review/);
   assert.match(prompt, /HTTPS images are blocked in previews by default/);
   assert.match(prompt, /Avoid remote image URLs unless the user asks/);
   assert.match(prompt, /HTML or SVG projects in a sandbox/);
@@ -55,8 +56,12 @@ test('Canvas attachment guidance tells models to inspect the selected file inste
   assert.match(attached, /never ask which Canvas file/i);
   assert.match(attached, /acknowledge the filename and ask only what change to make/i);
 
+  const snapshot = buildAssistantPrompt({ latestUserMessage: 'Update the page.\nCanvas workspace context (automatic): current snapshot of 1 files and 0 folders.\nWorkspace files:\n- index.html' });
+  assert.match(snapshot, /current full Canvas manifest and source snapshot/);
+  assert.match(snapshot, /never ask which file/i);
+
   const missing = buildAssistantPrompt({ latestUserMessage: 'View the Canvas and edit.' });
-  assert.match(missing, /click “Edit <filename> with AI”/);
+  assert.match(missing, /this turn did not include Canvas context/);
 
   const partial = buildAssistantPrompt({ latestUserMessage: 'Canvas file attached for context only (partial): app.html\nfirst 30KB' });
   assert.match(partial, /only a partial excerpt of "app\.html"/);

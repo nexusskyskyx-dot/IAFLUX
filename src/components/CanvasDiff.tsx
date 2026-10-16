@@ -11,7 +11,7 @@ export default function CanvasDiff({ file, onRestore }: { file: WorkspaceFile; o
     return <div className="canvas-empty canvas-diff-empty">
       <FileDiff size={27} />
       <strong>No saved diff yet.</strong>
-      <p>Edit this file, or attach it with <b>Edit with AI</b>. The app keeps the previous version for comparison.</p>
+      <p>Edit this file or ask AIFLUX to change it in chat. The current Canvas workspace is shared automatically, and the app keeps the previous version for comparison.</p>
     </div>;
   }
 

@@ -35,6 +35,7 @@ test('chat displays the search mode, trusted source links, and honest skipped-se
         } },
         { id: '3', role: 'user', content: 'Build a button', createdAt: 3 },
         { id: '4', role: 'assistant', content: 'Here is a button.', status: 'done', createdAt: 4, searchSkipped: true },
+        { id: '5', role: 'assistant', content: 'Removed the unused file.\n\n```aiflux-workspace\n{"operations":[{"type":"delete-file","path":"old.ts"}]}\n```', status: 'done', createdAt: 5 },
       ],
     };
     const props = {
@@ -46,11 +47,14 @@ test('chat displays the search mode, trusted source links, and honest skipped-se
     };
     const html = renderToStaticMarkup(React.createElement(ChatPanel, props));
     assert.match(html, /Web search auto\. Switch to Always/);
-    assert.match(html, /Context\+ plus live search for current topics\./);
+    assert.match(html, /Canvas auto-shared \(0 files\)/);
+    assert.match(html, /Context\+ plus live search when useful\./);
     assert.match(html, /LIVE WEB SEARCH/);
     assert.match(html, /href="https:\/\/example.org\/notes"/);
     assert.match(html, /Official release notes/);
     assert.match(html, /No live web search used for this answer/);
+    assert.match(html, /Canvas workspace actions/);
+    assert.match(html, /Delete file old\.ts/);
     assert.doesNotMatch(html, /href="javascript:/);
     assert.doesNotMatch(html, /Unsafe link/);
     assert.match(html, /aria-label="Browse GitHub context"/);
@@ -87,15 +91,19 @@ test('Canvas exposes an explicit GitHub publishing action with a review-before-p
     const { default: Canvas } = await vite.ssrLoadModule('/src/components/Canvas.tsx');
     const { default: GitHubPublishModal } = await vite.ssrLoadModule('/src/components/GitHubPublishModal.tsx');
     const file = { id: 'file-1', name: 'index.html', content: '<h1>New</h1>', previousContent: '<h1>Old</h1>', lastChangedBy: 'ai', origin: 'generated' };
-    const conversation = { id: 'test-chat', title: 'Publish', createdAt: 1, updatedAt: 1, files: [file], selectedFileId: file.id, messages: [] };
+    const deletedFile = { id: 'file-2', name: 'old.html', content: '<h1>Old</h1>', origin: 'user' };
+    const conversation = { id: 'test-chat', title: 'Publish', createdAt: 1, updatedAt: 1, files: [file], folders: ['assets'], deletedFiles: [deletedFile], deletedFolders: ['archive'], selectedFileId: file.id, messages: [] };
     const canvasHtml = renderToStaticMarkup(React.createElement(Canvas, {
       conversation, mobileOpen: false, onClose() {}, onSelectFile() {}, onUpdateFile() {}, onRestoreFile() {},
-      onCreateFile() {}, onDeleteFile() {}, onAddContext() {}, onNotify() {}, onPublishGitHub() {},
+      onCreateFile() {}, onCreateFolder() {}, onDeleteFile() {}, onDeleteFolder() {}, onRestoreDeletedFile() {}, onRestoreDeletedFolder() {}, onNotify() {}, onPublishGitHub() {},
     }));
     assert.match(canvasHtml, /Review and publish Canvas files to GitHub/);
     assert.match(canvasHtml, /aria-label="Canvas modes"/);
     for (const mode of ['VIEW', 'EDIT', 'TEST', 'DIFF']) assert.match(canvasHtml, new RegExp(`${mode}<\\/button>`));
-    assert.match(canvasHtml, /Edit index\.html with AI/);
+    assert.match(canvasHtml, /FULL CANVAS AUTO-SHARED · 1 FILE · 1 FOLDER/);
+    assert.match(canvasHtml, /assets\//);
+    assert.match(canvasHtml, /Recently deleted/);
+    assert.match(canvasHtml, /Restore old\.html/);
     const { default: CanvasDiff } = await vite.ssrLoadModule('/src/components/CanvasDiff.tsx');
     const diffHtml = renderToStaticMarkup(React.createElement(CanvasDiff, { file, onRestore() {} }));
     assert.match(diffHtml, /diff-added/);
