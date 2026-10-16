@@ -53,11 +53,15 @@ test('parses AI tool calls and explicit opt-outs for OpenAI-compatible, Gemini a
   assert.equal(parseSearchDecision('groq', { choices: [{ message: { content: 'I will look that up' } }] }), undefined);
 });
 
-test('auto search respects explicit skip; unsupported tools fall back only for current or always questions', async () => {
+test('Auto respects ordinary skips but guarantees live lookup for current library and design-trend requests', async () => {
   const latest = input('gemini', 'Find the latest React release');
+  const trending = input('gemini', 'What are the best current React UI libraries for web design?');
+  const trendingOff = input('gemini', 'What are the best current React UI libraries for web design?', 'off');
   const ignored = input('gemini', 'Build a simple button');
   const skip = async () => response({ candidates: [{ content: { parts: [{ text: 'NO_SEARCH' }] } }] });
+  assert.equal(await planWebSearch(trendingOff, 'key', '', { fetchImpl: async () => { throw new Error('Off must not call the planner'); } }), null);
   assert.equal(await planWebSearch(latest, 'key', '', { fetchImpl: skip }), null);
+  assert.equal(await planWebSearch(trending, 'key', '', { fetchImpl: skip }), 'What are the best current React UI libraries for web design?');
   const unsupported = async () => response('function calling is unsupported', 400);
   assert.equal(await planWebSearch(latest, 'key', '', { fetchImpl: unsupported }), 'Find the latest React release');
   assert.equal(await planWebSearch(ignored, 'key', '', { fetchImpl: unsupported }), null);
@@ -65,6 +69,9 @@ test('auto search respects explicit skip; unsupported tools fall back only for c
   assert.equal(await planWebSearch(input('gemini', 'Find latest React docs\n\nAttached file: private.ts\n```\nSECRET_PROJECT_CODE\n```', 'always'), 'key', '', { fetchImpl: unsupported }), 'Find latest React docs');
   assert.equal(likelyNeedsSearch('How do I build a button?'), false);
   assert.equal(likelyNeedsSearch('What is the current release?'), true);
+  assert.equal(likelyNeedsSearch('Which front-end libraries are trending right now?'), true);
+  assert.equal(likelyNeedsSearch('What is the latest version of Tailwind CSS?'), true);
+  assert.equal(likelyNeedsSearch('Show me a basic React button'), false);
   assert.equal(normalizeSearchQuery('Find key=value sk-1234567890123'), null);
   assert.equal(normalizeSearchQuery('someone@example.com latest releases'), null);
   assert.equal(await planWebSearch(input('gemini', 'Find my password=private123 on the web', 'always'), 'key', '', { fetchImpl: unsupported }), null);

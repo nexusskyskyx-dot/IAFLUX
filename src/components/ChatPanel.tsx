@@ -161,7 +161,7 @@ export default function ChatPanel(props: Props) {
           {props.sending ? <button className="send-button stop-button" onClick={props.onStop} title="Stop generation" aria-label="Stop generation"><Square size={15} fill="currentColor" /></button> : <button className="send-button" onClick={send} disabled={!draft.trim()} title="Send message" aria-label="Send message"><Send size={17} strokeWidth={2} /></button>}
         </div>
       </div>
-      <div className="composer-hint"><span><span className="hint-star">✳</span> {props.searchMode === 'off' ? 'Built to help you build better.' : props.searchMode === 'auto' ? 'Web search when the AI needs it.' : 'Web search on every message.'}</span><span>Enter to send <span className="hint-divider">·</span> Shift + Enter for a new line</span></div>
+      <div className="composer-hint"><span><span className="hint-star">✳</span> {props.searchMode === 'off' ? 'Context+ adds relevant design, coding & reasoning notes.' : props.searchMode === 'auto' ? 'Context+ plus live search for current topics.' : 'Context+ plus live web search each turn.'}</span><span>Enter to send <span className="hint-divider">·</span> Shift + Enter for a new line</span></div>
     </div></div>
   </div>;
 }

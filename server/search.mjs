@@ -37,8 +37,14 @@ export function normalizeSearchQuery(value) {
   return query;
 }
 
+const CURRENT_LIBRARY_SEARCH = /\b(?:trend(?:ing)?|popular|most\s+used|best|top|newest|latest|current|up\s?to\s?date)\b.{0,100}\b(?:librar(?:y|ies)|frameworks?|packages?|versions?|documentation|docs?|tools?|ui\s?kits?|component\s?libraries|design\s?systems?|web\s?design|user\s?interfaces?|ui|ux|websites?|landing\s?pages?)\b|\b(?:librar(?:y|ies)|frameworks?|packages?|versions?|documentation|docs?|tools?|ui\s?kits?|component\s?libraries|design\s?systems?|web\s?design|user\s?interfaces?|ui|ux|websites?|landing\s?pages?)\b.{0,100}\b(?:trend(?:ing)?|popular|most\s+used|best|top|newest|latest|current|up\s?to\s?date)\b/i;
+
+function requiresCurrentLibrarySearch(question) {
+  return CURRENT_LIBRARY_SEARCH.test(question);
+}
+
 export function likelyNeedsSearch(question) {
-  return /\b(?:search|look up|find online|browse|web|internet|today|tonight|yesterday|tomorrow|latest|recent|current|right now|this week|this month|news|weather|price|release|updated|up.to.date|as of|202[5-9])\b/i.test(question);
+  return requiresCurrentLibrarySearch(question) || /\b(?:search|look up|find online|browse|web|internet|today|tonight|yesterday|tomorrow|latest|recent|current|right now|this week|this month|news|weather|price|release|updated|up.to.date|as of|202[5-9])\b/i.test(question);
 }
 
 export function buildSearchPlanRequest(input, key, ollamaBaseUrl, now = new Date()) {
@@ -82,6 +88,7 @@ export function parseSearchDecision(provider, payload) {
 }
 
 export async function planWebSearch(input, key, ollamaBaseUrl, { signal, fetchImpl = fetch } = {}) {
+  if (input.searchMode === 'off') return null;
   const question = latestQuestion(input);
   const fallback = normalizeSearchQuery(question.replace(/\s+/g, ' ').slice(0, 180));
   const useFallback = () => input.searchMode === 'always' || likelyNeedsSearch(question) ? fallback : null;
@@ -104,7 +111,7 @@ export async function planWebSearch(input, key, ollamaBaseUrl, { signal, fetchIm
       throw new RequestError(502, 'OpenRouter returned a safety or utility model instead of a coding assistant.');
     }
     const decision = parseSearchDecision(input.provider, payload);
-    if (decision === null && input.searchMode === 'auto') return null;
+    if (decision === null && input.searchMode === 'auto' && !requiresCurrentLibrarySearch(question)) return null;
     return normalizeSearchQuery(decision) || useFallback();
   } catch (error) {
     if (error instanceof RequestError || signal?.aborted) throw error;
@@ -182,6 +189,9 @@ export function withSearchContext(input, query, sources, now = new Date()) {
   } : message);
   return {
     ...input, messages, searchPerformed: true,
-    systemPrompt: buildAssistantPrompt({ provider: input.provider, model: input.model, searchMode: input.searchMode, searchPerformed: true }),
+    systemPrompt: buildAssistantPrompt({
+      provider: input.provider, model: input.model, searchMode: input.searchMode, searchPerformed: true,
+      latestUserMessage: input.messages.at(-1)?.content || '',
+    }),
   };
 }

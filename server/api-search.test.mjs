@@ -147,6 +147,32 @@ test('auto mode lets the model skip unnecessary search and clearly reports it', 
   assert.doesNotMatch(answerPrompt, /The server ran a live web search/);
 });
 
+test('Auto forces a live lookup for current UI-library trends even when the model planner opts out', async () => {
+  const calls = [];
+  const question = 'Which React UI libraries are trending for web design right now?';
+  await withServer(async (url, options) => {
+    calls.push({ url, options });
+    if (url.endsWith(':generateContent')) return json({ candidates: [{ content: { parts: [{ text: 'NO_SEARCH' }] } }] });
+    if (url === 'https://api.tavily.com/search') return json({ results: [{ title: 'Current library report', url: 'https://example.org/ui-libraries', content: 'Recent evidence about component libraries.' }] });
+    return stream('The sources describe several options.');
+  }, async (post) => {
+    const result = await post(body('auto', question));
+    assert.equal(result.status, 200);
+    const events = parseEvents(await result.text());
+    assert.deepEqual(events.map(({ type }) => type), ['start', 'search', 'search', 'sources', 'delta', 'done']);
+    assert.deepEqual(events.filter(({ type }) => type === 'search').map(({ phase }) => phase), ['planning', 'searching']);
+    assert.equal(events.find(({ type }) => type === 'sources').sources[0].url, 'https://example.org/ui-libraries');
+  });
+  assert.equal(calls.length, 3);
+  assert.equal(calls[1].url, 'https://api.tavily.com/search');
+  assert.equal(JSON.parse(calls[1].options.body).query, question);
+  const answerPrompt = JSON.parse(calls[2].options.body).systemInstruction.parts[0].text;
+  assert.match(answerPrompt, /AIFLUX Context\+ reference library/);
+  assert.match(answerPrompt, /Frontend and component libraries/);
+  assert.match(answerPrompt, /Library and product research/);
+  assert.match(answerPrompt, /The server ran a live web search/);
+});
+
 test('always mode calls Tavily keyless, passes attributed sources to the AI, and streams source links', async () => {
   const calls = [];
   await withServer(async (url, options) => {

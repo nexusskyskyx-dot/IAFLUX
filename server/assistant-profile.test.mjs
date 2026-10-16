@@ -39,6 +39,8 @@ test('the central capability profile covers shipped features and keeps identity 
   assert.match(prompt, /after the user reviews the exact contents and explicitly confirms/);
   assert.match(prompt, /model itself has no GitHub write tool/);
   assert.match(prompt, /local browser conversations/);
+  assert.match(prompt, /Context\+ automatically adds relevant server-curated reference notes/);
+  assert.match(prompt, /AIFLUX Context\+ reference library:/);
   assert.match(prompt, /cannot directly edit an existing Canvas file/);
   assert.match(prompt, /cannot.*run commands or tests, deploy code/);
   assert.match(prompt, /```html filename="index\.html"/);
@@ -50,6 +52,7 @@ test('every provider includes the AIFLUX profile as a high-priority instruction 
     const prompt = systemText(request);
     assert.match(prompt, /^You are AIFLUX,/, provider);
     assert.match(prompt, /Available AIFLUX features:/, provider);
+    assert.match(prompt, /AIFLUX Context\+ reference library:/, provider);
     assert.match(prompt, /Web mode: off/, provider);
     assert.match(prompt, /No live search was performed/, provider);
     assert.ok(prompt.includes(models[provider]), `Current model missing from ${provider} prompt`);

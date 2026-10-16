@@ -46,6 +46,7 @@ test('chat displays the search mode, trusted source links, and honest skipped-se
     };
     const html = renderToStaticMarkup(React.createElement(ChatPanel, props));
     assert.match(html, /Web search auto\. Switch to Always/);
+    assert.match(html, /Context\+ plus live search for current topics\./);
     assert.match(html, /LIVE WEB SEARCH/);
     assert.match(html, /href="https:\/\/example.org\/notes"/);
     assert.match(html, /Official release notes/);

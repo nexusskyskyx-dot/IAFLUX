@@ -71,7 +71,8 @@ export function validateChat(body, ollamaConfigured = false, xkiroFreeModelIds =
 }
 
 export function buildRequest({ provider, model, messages, searchMode = 'off', searchPerformed = false, systemPrompt }, key, ollamaBaseUrl) {
-  const prompt = systemPrompt || buildAssistantPrompt({ provider, model, searchMode, searchPerformed });
+  const latestUserMessage = [...messages].reverse().find((message) => message.role === 'user')?.content || '';
+  const prompt = systemPrompt || buildAssistantPrompt({ provider, model, searchMode, searchPerformed, latestUserMessage });
   if (provider !== 'ollama' && !key) {
     throw new RequestError(401, `Connect your ${providerName(provider)} API key in Settings to continue.`);
   }
