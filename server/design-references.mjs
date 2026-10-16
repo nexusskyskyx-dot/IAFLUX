@@ -106,7 +106,14 @@ export async function primeDesignReferences(text, options = {}) {
     title: result?.design?.title || '',
     error: error || result?.error || '',
   }));
-  if (!results.some((result) => result.ok)) return null;
+  if (!results.some((result) => result.ok)) {
+    // Nothing could be read, so there is no note — but the attempts are still
+    // returned so the UI can show the gallery was tried and could not be
+    // reached. Otherwise a failed fetch is indistinguishable from the feature
+    // being switched off, and nobody can tell which. Deliberately not cached:
+    // a transient failure must not be remembered for half an hour.
+    return { at: now(), url: galleryUrl, results, note: '' };
+  }
 
   const blocks = [];
   fetched.forEach(({ url, result }, index) => {

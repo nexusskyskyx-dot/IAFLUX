@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import {
   browse, ipIsBlocked, parseRobots, robotsAllows, extractDesign, toReadableText,
-  extractReferences, describeBrowse, BROWSE_USER_AGENT,
+  extractReferences, describeBrowse, collectExternalCss, BROWSE_USER_AGENT,
 } from './browse.mjs';
 
 // ---------------------------------------------------------------------------
@@ -337,4 +337,50 @@ test('readable text collapses markup into lines a model can scan', () => {
 test('the crawler identifies itself honestly', () => {
   assert.match(BROWSE_USER_AGENT, /AIFLUX/);
   assert.match(BROWSE_USER_AGENT, /https:\/\//, 'with a contact URL');
+});
+
+test('a page whose design system lives in a linked stylesheet is still understood', async () => {
+  // Most real sites keep their palette and type scale in external CSS, so a
+  // reader that only looked at inline <style> learned almost nothing.
+  const CSS = `:root{--brand:#ff5a1f;--ink:#111318;--radius:16px;--step:clamp(2rem,6vw,5rem)}
+    body{font-family:"Space Grotesk",sans-serif;background:var(--ink)}`;
+  await withServer((req, res) => {
+    if (req.url === '/robots.txt') return PERMISSIVE(req, res);
+    if (req.url === '/site.css') { res.writeHead(200, { 'content-type': 'text/css' }); res.end(CSS); return; }
+    res.writeHead(200, { 'content-type': 'text/html' });
+    res.end('<html><head><title>External</title><link rel="stylesheet" href="/site.css"></head><body><h1>Hi</h1></body></html>');
+  }, async (base) => {
+    const result = await browse(`${base}/`, { allowPrivateAddresses: true });
+    assert.equal(result.ok, true);
+    assert.equal(result.design.tokens['--brand'], '#ff5a1f', 'the palette came from the stylesheet');
+    assert.equal(result.design.tokens['--step'], 'clamp(2rem,6vw,5rem)');
+    assert.ok(result.design.fonts.includes('Space Grotesk'), 'and so did the display face');
+  });
+});
+
+test('a stylesheet that will not load does not fail the page', async () => {
+  await withServer((req, res) => {
+    if (req.url === '/robots.txt') return PERMISSIVE(req, res);
+    if (req.url === '/site.css') { res.writeHead(500); res.end(''); return; }
+    res.writeHead(200, { 'content-type': 'text/html' });
+    res.end('<html><head><title>Broken CSS</title><link rel="stylesheet" href="/site.css"></head><body><h1>Hi</h1></body></html>');
+  }, async (base) => {
+    const result = await browse(`${base}/`, { allowPrivateAddresses: true });
+    assert.equal(result.ok, true, 'the page still reads');
+    assert.equal(result.design.title, 'Broken CSS');
+  });
+});
+
+test('a stylesheet link is held to the same address rules as the page', async () => {
+  // A public page linking a private stylesheet is the same SSRF hole as a
+  // redirect there, so the link is validated just as hard. Tested on the
+  // helper directly: a page served from 127.0.0.1 can only be fetched with
+  // the guard lifted, which would lift it for the stylesheet too.
+  for (const href of ['http://169.254.169.254/x.css', 'http://127.0.0.1/x.css', 'http://10.0.0.5/x.css']) {
+    const html = `<html><head><link rel="stylesheet" href="${href}"></head><body>Hi</body></html>`;
+    assert.equal(await collectExternalCss(html, 'https://example.com/', { allowPrivateAddresses: false }), '', href);
+  }
+  // A stylesheet that simply cannot be fetched fails quietly, not loudly.
+  const missing = '<html><head><link rel="stylesheet" href="https://fonts.invalid/x.css"></head></html>';
+  assert.equal(await collectExternalCss(missing, 'https://example.com/', { allowPrivateAddresses: false }), '');
 });

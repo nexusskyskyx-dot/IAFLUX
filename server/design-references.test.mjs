@@ -108,18 +108,31 @@ test('a different kind of page primes a different gallery', async () => {
   assert.deepEqual(called, ['https://land-book.com/design/pricing-page', 'https://land-book.com/design/portfolio']);
 });
 
-test('a gallery that cannot be read degrades to nothing rather than failing', async () => {
+test('a gallery that cannot be read degrades to no note but still reports the attempt', async () => {
   const primed = await primeDesignReferences('landing page', {
     browseImpl: async () => ({ ok: false, error: 'offline' }),
   });
-  assert.equal(primed, null, 'no references means no note, and the model falls back on the playbook');
+  assert.notEqual(primed, null, 'the attempt is returned');
+  assert.equal(primed.note, '', 'no references means no note, and the model falls back on the playbook');
+  assert.equal(primed.results.length, 1);
+  assert.equal(primed.results[0].ok, false);
+  assert.match(primed.results[0].error, /offline/, 'with the reason, so the user can see what happened');
 });
 
 test('a fetch that throws is survived', async () => {
   const primed = await primeDesignReferences('landing page', {
     browseImpl: async () => { throw new Error('boom'); },
   });
-  assert.equal(primed, null);
+  assert.equal(primed.note, '');
+  assert.match(primed.results[0].error, /boom/);
+});
+
+test('a failed attempt is not cached, so it can succeed on the next message', async () => {
+  let calls = 0;
+  const browseImpl = async () => { calls += 1; return { ok: false, error: 'offline' }; };
+  await primeDesignReferences('landing page', { browseImpl });
+  await primeDesignReferences('landing page', { browseImpl });
+  assert.equal(calls, 2, 'it tries again rather than remembering the failure');
 });
 
 test('a gallery that loads but has no featured site still counts', async () => {

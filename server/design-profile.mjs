@@ -137,12 +137,18 @@ semantic landmarks (header/nav/main/footer); one h1 per page and a sensible
 heading order; alt text on meaningful images; real labels on inputs; and a
 keyboard path through everything clickable.
 
-The Canvas preview runs in a sandboxed frame with no network. Anything loaded
-from a CDN — Google Fonts, a framework from a script tag, remote images — will
-not arrive, and the page will look broken to the user even though the file is
-correct. So: use a system font stack or an @font-face with the file on the
-Canvas, write CSS and JavaScript as local files, and inline SVG rather than
-loading an icon set. Build the page to work with nothing but its own files.`;
+WHAT THE PREVIEW ALLOWS — get this wrong and the page looks broken:
+- Google Fonts DO load. Link the stylesheet from fonts.googleapis.com and the
+  font files arrive from fonts.gstatic.com. Use them: a real display face is
+  most of what separates a designed page from a default one, and falling back
+  to a system font stack is the fastest way to look generic. Pick one display
+  face and one text face, with only the weights you actually use.
+- Remote scripts are blocked. Any framework, icon library or CDN script tag
+  silently will not run. Write all CSS and JavaScript as local Canvas files.
+- Remote images are blocked. Build visuals from CSS — gradients, geometry,
+  grain — or inline SVG, or data: images. Not from a hosted image URL.
+- JavaScript cannot reach the network at all: no fetch, no XHR, no WebSocket.
+  Anything interactive has to work from data already on the page.`;
 
 const DESIGN_SIGNALS = /\b(website|web\s?site|webpage|web\s?page|landing\s?page|homepage|hero\s?(section|banner)?|portfolio|web\s?design|design(?:ed|ing)?\s+(?:a|an|the|my|our)?\s*(?:site|page|website|landing|ui|interface|layout)|ui\b|ux\b|user\s?interface|interface|layout|responsive|mobile[-\s]?first|css|scss|tailwind|stylesheet|theme|dark\s?mode|typography|font[s]?|colour\s?scheme|color\s?scheme|palette|animation[s]?|transition[s]?|scroll|parallax|nav(?:bar|igation)?|footer|header|sidebar|modal|card[s]?|button[s]?|form\s?design|dashboard|component[s]?|design\s?system|mockup|wireframe|framer|webflow|figma|make\s+it\s+(?:look|pretty|beautiful|modern|nice|better)|restyle|redesign|style\s+this|html\b|jsx?\b|react\s+component|pricing|testimonial|faq|call\s+to\s+action|product\s?page|sign[-\s]?up|checkout|ecommerce|e[-\s]?commerce|about\s+us|case\s+study|gallery|template|brand\s?ing|logo|icon\s?set|style\s?guide)\b/i;
 

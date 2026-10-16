@@ -179,7 +179,17 @@ export function mergeGeneratedFiles(existing: WorkspaceFile[], generated: Worksp
   return files;
 }
 
-const CSP = `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'`;
+/**
+ * What a previewed page may reach.
+ *
+ * Remote scripts, remote images and every JavaScript network call stay
+ * blocked, so a generated page cannot phone home, run someone else's code, or
+ * leak that the preview was opened. Web fonts are the deliberate exception: a
+ * display face is most of what separates a designed page from a default one,
+ * and forbidding it condemned every result to the system font stack, which
+ * reads as generic no matter how good the layout is.
+ */
+const CSP = `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https://fonts.googleapis.com; img-src data: blob:; font-src data: https://fonts.gstatic.com; connect-src 'none'; form-action 'none'; base-uri 'none'`;
 
 export function buildPreview(files: WorkspaceFile[]): string | null {
   const html = files.find((file) => file.name.toLowerCase().endsWith('.html'));

@@ -166,7 +166,8 @@ test('the playbook warns about the tell-tale defaults of a generated page', () =
   for (const pattern of [/Purple-to-blue gradient hero/, /Three identical feature cards/, /Lorem ipsum/, /Emoji standing in for icons/]) {
     assert.match(prompt, pattern);
   }
-  assert.match(prompt, /sandboxed frame with no network/, 'and about the sandbox the preview runs in');
+  assert.match(prompt, /WHAT THE PREVIEW ALLOWS/, 'and about what the sandbox permits');
+  assert.match(prompt, /Google Fonts DO load/, 'including that web fonts are available');
   assert.match(prompt, /system font stack/);
 });
 

@@ -21,6 +21,9 @@ export const BROWSE_MAX_BYTES = 2_000_000;
 export const BROWSE_MAX_REDIRECTS = 3;
 export const BROWSE_TEXT_BUDGET = 24_000;
 export const BROWSE_USER_AGENT = 'AIFLUX-Bot/1.0 (+https://github.com/nexusskyskyx-dot/IAFLUX)';
+/** Linked stylesheets to read, and how much of each. */
+const STYLESHEET_LIMIT = 2;
+const STYLESHEET_BUDGET_BYTES = 200_000;
 
 export class BrowseError extends Error {
   constructor(code, message) {
@@ -316,9 +319,12 @@ const FRAMEWORK_SIGNATURES = [
 ];
 
 /** Pull the design signals worth describing: tokens, type, colour, structure. */
-export function extractDesign(html, finalUrl = '') {
+export function extractDesign(html, finalUrl = '', externalCss = '') {
   const head = html.match(/<head\b[^>]*>([\s\S]*?)<\/head>/i)?.[1] || html.slice(0, 60_000);
-  const css = collectStyles(html);
+  // Almost no real site keeps its design system inline: the palette, the type
+  // scale and the spacing live in linked stylesheets. Reading inline <style>
+  // alone finds the tokens on a handful of sites and nothing on the rest.
+  const css = `${collectStyles(html)}\n${externalCss}`;
 
   const meta = (name) => {
     const pattern = new RegExp(`<meta\\b[^>]*(?:name|property)\\s*=\\s*["']${name}["'][^>]*content\\s*=\\s*["']([^"']*)["']`, 'i')
@@ -377,6 +383,47 @@ export function extractDesign(html, finalUrl = '') {
 
 const STRIP_PATTERN = /<\s*(script|style|noscript|svg|iframe|template|canvas|video|audio|form)\b[\s\S]*?<\s*\/\s*\1\s*>/gi;
 const BLOCK_PATTERN = /<\s*\/?\s*(p|div|section|article|header|footer|nav|main|aside|h[1-6]|li|ul|ol|tr|br|blockquote|pre|hr)\b[^>]*>/gi;
+
+/**
+ * The CSS behind a page, from the stylesheets it links to.
+ *
+ * Redirects are refused rather than followed: the initial URL was checked, but
+ * a stylesheet that answers 302 to a private address would otherwise walk
+ * straight past the guard.
+ */
+export async function collectExternalCss(html, baseUrl, options = {}) {
+  const { fetchImpl = fetch, resolver = dns, allowPrivateAddresses = false, timeoutMs = 6_000 } = options;
+  const urls = [];
+  for (const match of html.matchAll(/<link\b[^>]*\brel\s*=\s*["']?stylesheet["']?[^>]*>/gi)) {
+    const href = decodeEntities(match[0].match(/\bhref\s*=\s*["']([^"']+)["']/i)?.[1] || '');
+    if (!href) continue;
+    let target;
+    try { target = new URL(href, baseUrl); } catch { continue; }
+    if (target.protocol !== 'http:' && target.protocol !== 'https:') continue;
+    urls.push(target.toString());
+    if (urls.length >= STYLESHEET_LIMIT) break;
+  }
+  if (!urls.length) return '';
+
+  const parts = [];
+  for (const cssUrl of urls) {
+    if (timeoutMs < 1_000) break;
+    try {
+      const target = await assertPublicUrl(cssUrl, { resolver, allowPrivateAddresses });
+      const response = await fetchImpl(target.toString(), {
+        redirect: 'manual',
+        signal: AbortSignal.timeout(Math.min(4_000, timeoutMs)),
+        headers: { 'user-agent': BROWSE_USER_AGENT, accept: 'text/css,*/*' },
+      });
+      if (!response.ok) continue;
+      const { buffer } = await readCapped(response, STYLESHEET_BUDGET_BYTES);
+      parts.push(decodeBody(buffer, response.headers.get('content-type') || 'text/css'));
+    } catch {
+      // A stylesheet that will not load is not worth failing the page over.
+    }
+  }
+  return parts.join('\n');
+}
 
 /** Readable prose: what a person would see if they selected the page. */
 export function toReadableText(html, budget = BROWSE_TEXT_BUDGET) {
@@ -578,13 +625,16 @@ export async function browse(rawUrl, options = {}) {
 
     const { buffer, truncated } = await readCapped(response, maxBytes);
     const html = decodeBody(buffer, contentType);
+    const externalCss = await collectExternalCss(html, url.toString(), {
+      fetchImpl, resolver, allowPrivateAddresses, timeoutMs: Math.max(1_000, deadline - Date.now()),
+    });
     return {
       url: rawUrl,
       finalUrl: url.toString(),
       ok: true,
       status: response.status,
       truncated,
-      design: extractDesign(html, url.toString()),
+      design: extractDesign(html, url.toString(), externalCss),
       text: toReadableText(html, textBudget),
       references: extractReferences(html, url.toString()),
       robots: robotsStates,

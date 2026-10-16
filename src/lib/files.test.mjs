@@ -50,3 +50,21 @@ test('conversation history includes attachments but skips failed assistant messa
   assert.match(result[0].content, /Attached file: test.py/);
   assert.equal(result[1].content, 'Try again');
 });
+
+test('the preview sandbox allows web fonts but nothing that can phone home', async () => {
+  const { buildPreview } = await import('./files.ts');
+  const preview = buildPreview([{ id: '1', name: 'index.html', content: '<html><head></head><body>hi</body></html>', origin: 'generated' }]);
+  const csp = preview.match(/content="([^"]*)"/)[1];
+  // A display face is most of what separates a designed page from a default
+  // one, so fonts are deliberately permitted while everything else stays shut.
+  assert.match(csp, /font-src data: https:\/\/fonts\.gstatic\.com/, 'Google Fonts files load');
+  assert.match(csp, /style-src 'unsafe-inline' https:\/\/fonts\.googleapis\.com/, 'and the stylesheet loads');
+  // The rest of the posture is unchanged.
+  assert.match(csp, /default-src 'none'/);
+  assert.match(csp, /script-src 'unsafe-inline'/, 'local scripts only — no remote code');
+  assert.doesNotMatch(csp, /script-src[^;]*https:/, 'no remote scripts at all');
+  assert.match(csp, /connect-src 'none'/, 'JavaScript cannot reach the network');
+  assert.match(csp, /img-src data: blob:/, 'remote images still blocked');
+  assert.match(csp, /form-action 'none'/);
+  assert.match(csp, /base-uri 'none'/);
+});
