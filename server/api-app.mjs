@@ -7,7 +7,7 @@ import {
   readSSE, readLines, extractChunk, getFreeOpenRouterModels, getFreeXkiroModels,
   getGeminiModels, getGroqModels,
 } from './providers.mjs';
-import { planWebSearch, searchWeb, withSearchContext } from './search.mjs';
+import { planWebSearch, searchWeb, shouldSkipSearchPlanning, withSearchContext } from './search.mjs';
 import { createGitHubRouter } from './github.mjs';
 
 const app = express();
@@ -190,18 +190,22 @@ app.post('/api/chat', rateLimit, async (req, res) => {
     timeout = setTimeout(() => controller.abort(new Error('timeout')), 120_000);
     if (input.searchMode !== 'off') {
       startStream(res, input.model);
-      sendEvent(res, { type: 'search', phase: 'planning' });
-      const query = await planWebSearch(input, key, ollamaBaseUrl, { signal: controller.signal });
-      if (query) {
-        recordWebSearch(req);
-        sendEvent(res, { type: 'search', phase: 'searching', query });
-        const sources = await searchWeb(query, suppliedSearchKey || envSearchKey, { signal: controller.signal });
-        sendEvent(res, { type: 'sources', query, sources });
-        ({ url, options, format } = buildRequest(withSearchContext(input, query, sources), key, ollamaBaseUrl));
-      } else {
-        // The already-built answer request has the full AIFLUX profile plus
-        // a mode-specific warning that no live search was performed.
+      if (shouldSkipSearchPlanning(input)) {
         sendEvent(res, { type: 'search', phase: 'skipped' });
+      } else {
+        sendEvent(res, { type: 'search', phase: 'planning' });
+        const query = await planWebSearch(input, key, ollamaBaseUrl, { signal: controller.signal });
+        if (query) {
+          recordWebSearch(req);
+          sendEvent(res, { type: 'search', phase: 'searching', query });
+          const sources = await searchWeb(query, suppliedSearchKey || envSearchKey, { signal: controller.signal });
+          sendEvent(res, { type: 'sources', query, sources });
+          ({ url, options, format } = buildRequest(withSearchContext(input, query, sources), key, ollamaBaseUrl));
+        } else {
+          // The already-built answer request has the full AIFLUX profile plus
+          // a mode-specific warning that no live search was performed.
+          sendEvent(res, { type: 'search', phase: 'skipped' });
+        }
       }
     }
     const upstream = await fetch(url, { ...options, signal: controller.signal });

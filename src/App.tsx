@@ -348,7 +348,7 @@ export default function App() {
     const canvasBudget = Math.max(1_000, Math.min(MAX_CANVAS_CONTEXT_CHARS, 155_000 - text.length - attachmentChars - attachments.length * 200));
     const canvasContext = buildCanvasContext(activeChat.files, activeChat.folders || [], activeChat.selectedFileId, canvasBudget);
     const assistantId = crypto.randomUUID();
-    const assistantMessage: ChatMessage = { id: assistantId, role: 'assistant', content: '', createdAt: now, status: 'streaming', model: selectedModel.name, ...(searchMode !== 'off' ? { searchStatus: 'planning' } : {}) };
+    const assistantMessage: ChatMessage = { id: assistantId, role: 'assistant', content: '', createdAt: now, status: 'streaming', model: selectedModel.name };
     const history = toProviderMessages([...activeChat.messages, userMessage], canvasContext.text);
     if (canvasContext.truncatedFiles.length || canvasContext.manifestTruncated) {
       const omitted = canvasContext.truncatedFiles.slice(0, 4).join(', ');

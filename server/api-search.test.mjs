@@ -159,8 +159,8 @@ test('Auto does not search a greeting because the appended Canvas snapshot says 
     const result = await post(body('auto', question, 'Hello'));
     assert.equal(result.status, 200);
     const events = parseEvents(await result.text());
-    assert.deepEqual(events.map(({ type }) => type), ['start', 'search', 'search', 'delta', 'done']);
-    assert.deepEqual(events.filter(({ type }) => type === 'search').map(({ phase }) => phase), ['planning', 'skipped']);
+    assert.deepEqual(events.map(({ type }) => type), ['start', 'search', 'delta', 'done']);
+    assert.deepEqual(events.filter(({ type }) => type === 'search').map(({ phase }) => phase), ['skipped']);
   });
   assert.equal(calls.length, 1);
   assert.ok(calls[0].url.endsWith(':streamGenerateContent?alt=sse'));
