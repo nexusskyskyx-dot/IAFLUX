@@ -48,6 +48,7 @@ test('the central capability profile covers shipped features and keeps identity 
   assert.match(prompt, /AIFLUX Context\+ reference library:/);
   assert.match(prompt, /cannot independently run shell commands or automated test suites/);
   assert.match(prompt, /```html filename="index\.html"/);
+  assert.match(prompt, /Do not leave requested code only in prose/);
 });
 
 test('Canvas attachment guidance tells models to inspect the selected file instead of asking which one', () => {

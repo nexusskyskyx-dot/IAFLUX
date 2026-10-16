@@ -177,7 +177,7 @@ export default function ChatPanel(props: Props) {
           {props.sending ? <button className="send-button stop-button" onClick={props.onStop} title="Stop generation" aria-label="Stop generation"><Square size={15} fill="currentColor" /></button> : <button className="send-button" onClick={send} disabled={!draft.trim()} title="Send message" aria-label="Send message"><Send size={17} strokeWidth={2} /></button>}
         </div>
       </div>
-      <div className="composer-hint"><span title="The current Canvas file tree and source are sent with each message, subject to the model context limit."><span className="hint-star">✳</span> Canvas auto-shared ({props.conversation.files.length} {props.conversation.files.length === 1 ? 'file' : 'files'}) · {props.searchMode === 'off' ? 'Context+ adds coding notes.' : props.searchMode === 'auto' ? 'Context+ plus live search when useful.' : 'Context+ plus live search every turn.'}</span><span>Enter to send <span className="hint-divider">·</span> Shift + Enter for a new line</span></div>
+      <div className="composer-hint"><span title="The current Canvas file tree and source are sent with each message, subject to the model context limit."><span className="hint-star">✳</span> Canvas auto-shared ({props.conversation.files.length} {props.conversation.files.length === 1 ? 'file' : 'files'}) · {props.searchMode === 'off' ? 'Context+ adds coding notes.' : props.searchMode === 'auto' ? 'Context+ plus live search when useful.' : 'Context+ plus live search for useful queries.'}</span><span>Enter to send <span className="hint-divider">·</span> Shift + Enter for a new line</span></div>
     </div></div>
   </div>;
 }

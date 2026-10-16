@@ -297,7 +297,7 @@ export default function App() {
     const next: SearchMode = searchMode === 'off' ? 'auto' : searchMode === 'auto' ? 'always' : 'off';
     setSearchMode(next);
     saveSearchMode(next);
-    notify(next === 'auto' ? 'Web search: the AI chooses when to look things up.' : next === 'always' ? 'Web search: search before every answer.' : 'Web search turned off.');
+    notify(next === 'auto' ? 'Web search: the AI chooses when to look things up.' : next === 'always' ? 'Web search: search for useful queries; greetings are skipped.' : 'Web search turned off.');
   };
   const changeView = (next: 'studio' | 'library') => {
     setView(next);
@@ -438,6 +438,8 @@ export default function App() {
       const appliedSummary = [...(count ? [`${count} file ${count === 1 ? 'change' : 'changes'}`] : []), ...latestMutation.applied];
       if (appliedSummary.length || latestMutation.skipped.length) {
         notify([...appliedSummary, ...latestMutation.skipped].join(' · '));
+      } else if (canvasMutationRequested) {
+        notify('No Canvas changes were applied. Ask AIFLUX for a complete fenced code block with a filename or an explicit file/folder action.');
       }
     }).catch((error: unknown) => {
       const aborted = controller.signal.aborted;

@@ -85,11 +85,11 @@ function parseWorkspaceOperationsJson(value: string): { operations: unknown[] } 
 }
 
 function locateWorkspaceOperationsPayload(markdown: string): { parsed: { operations: unknown[] }; block: string | null } | null {
-  const blocks = [...markdown.matchAll(/```([^\n]*)\n([\s\S]*?)```/g)];
+  const blocks = [...markdown.matchAll(/^ {0,3}(`{3,}|~{3,})([^\n]*)\r?\n([\s\S]*?)\r?\n {0,3}\1[ \t]*$/gm)];
   for (const block of blocks) {
-    const language = block[1].trim();
+    const language = block[2].trim();
     if (language && !/^(?:aiflux-workspace|json)(?:\s|$)/i.test(language)) continue;
-    const parsed = parseWorkspaceOperationsJson(block[2]);
+    const parsed = parseWorkspaceOperationsJson(block[3]);
     if (parsed) return { parsed, block: block[0] };
   }
   const trimmed = markdown.trim();
@@ -103,12 +103,12 @@ export function extractCodeFiles(
   editableTargets: Pick<WorkspaceFile, 'id' | 'name' | 'content'>[] = [],
   allowStarterReplacement = true,
 ): WorkspaceFile[] {
-  const blocks = /```([^\n]*)\n([\s\S]*?)```/g;
+  const blocks = /^ {0,3}(`{3,}|~{3,})([^\n]*)\r?\n([\s\S]*?)\r?\n {0,3}\1[ \t]*$/gm;
   const found: WorkspaceFile[] = [];
   let match: RegExpExecArray | null;
   while ((match = blocks.exec(markdown)) !== null) {
-    const info = match[1].trim();
-    let content = match[2].replace(/\n$/, '');
+    const info = match[2].trim();
+    let content = match[3].replace(/\r?\n$/, '');
     if (!content.trim()) continue;
     const language = info.split(/\s+/)[0]?.replace(/^\./, '').toLowerCase() || 'text';
     if (language === 'aiflux-workspace' || parseWorkspaceOperationsJson(content)) continue;
@@ -299,7 +299,7 @@ function hasPositiveAction(text: string, pattern: RegExp): boolean {
 export function requestsCanvasMutation(text: string): boolean {
   const informationalQuestion = /^\s*(?:how\b|what\b|why\b|which\b|explain\b|tell me\b|do you think\b|can you explain\b|could you explain\b|can you tell me\b|could you tell me\b)/i.test(text);
   if (informationalQuestion && !/\b(?:please|also|then)\b/i.test(text)) return false;
-  return hasPositiveAction(text, /\b(?:edit\w*|chang\w*|modif\w*|updat\w*|fix(?:es|ed|ing)?|refactor\w*|rewrit\w*|redesign\w*|implement\w*|creat\w*|build\w*|add\w*|delet\w*|remov\w*|renam\w*|mov\w*|replac\w*|writ\w*|mak(?:e|es|ing)|new|convert\w*|styl\w*|improv\w*|edita\w*|cambi\w*|modific\w*|actualiz\w*|arregl\w*|refactoriza\w*|reescrib\w*|rediseñ\w*|implementa\w*|crea\w*|construy\w*|agreg\w*|elimin\w*|borr\w*|renombr\w*|muev\w*|reemplaz\w*|haz\w*|hag\w*)\b/gi);
+  return hasPositiveAction(text, /\b(?:edit\w*|chang\w*|modif\w*|updat\w*|fix(?:es|ed|ing)?|refactor\w*|rewrit\w*|redesign\w*|implement\w*|creat\w*|generat\w*|build\w*|add\w*|delet\w*|remov\w*|renam\w*|mov\w*|replac\w*|writ\w*|mak(?:e|es|ing)|new|convert\w*|styl\w*|improv\w*|edita\w*|cambi\w*|modific\w*|actualiz\w*|arregl\w*|refactoriza\w*|reescrib\w*|rediseñ\w*|implementa\w*|crea\w*|construy\w*|agreg\w*|elimin\w*|borr\w*|renombr\w*|muev\w*|reemplaz\w*|haz\w*|hag\w*)\b/gi);
 }
 
 export function filterWorkspaceOperationsForRequest(operations: WorkspaceOperation[], request: string): WorkspaceOperation[] {

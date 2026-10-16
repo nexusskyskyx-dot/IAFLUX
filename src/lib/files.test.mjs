@@ -40,9 +40,11 @@ test('AI edits only the authorized unchanged Canvas file and preserves a diff ba
   assert.deepEqual(extractCodeFiles(markdown, [], [target]), [], 'a deleted or renamed snapshot file is not resurrected by a stale response');
 });
 
-test('sanitizes file names and infers snippet extensions', () => {
+test('sanitizes file names, infers snippet extensions, and recognizes tilde/long Markdown fences', () => {
   assert.equal(safeFilename('../../dangerous name.js'), 'dangerous-name.js');
   assert.equal(extractCodeFiles('```python\nprint("hello")\n```', [])[0].name, 'snippet-1.py');
+  assert.equal(extractCodeFiles('~~~html filename="page.html"\n<h1>Page</h1>\n~~~', [])[0].name, 'page.html');
+  assert.equal(extractCodeFiles('````css filename="style.css"\nbody { color: black; }\n````', [])[0].name, 'style.css');
 });
 
 test('the full Canvas tree and file contents are automatically attached to every user turn within the context budget', () => {
@@ -112,6 +114,7 @@ test('AI workspace operations create, rename, and soft-delete files and folders 
   assert.equal(requestsCanvasMutation('What would you change in the navigation?'), false);
   assert.equal(requestsCanvasMutation("Don't edit anything; just explain what this file does."), false);
   assert.equal(requestsCanvasMutation('Add a pricing page and update the navigation'), true);
+  assert.equal(requestsCanvasMutation('Generate code for a new page'), true);
   const authorized = filterWorkspaceOperationsForRequest(operations, 'Create an assets folder and delete the old source file');
   assert.deepEqual(authorized.map((item) => item.type), ['create-folder', 'delete-file', 'delete-folder']);
   assert.deepEqual(filterWorkspaceOperationsForRequest(operations, "Don't delete or rename anything; only explain."), []);

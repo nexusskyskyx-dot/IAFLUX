@@ -147,6 +147,25 @@ test('auto mode lets the model skip unnecessary search and clearly reports it', 
   assert.doesNotMatch(answerPrompt, /The server ran a live web search/);
 });
 
+test('Auto does not search a greeting because the appended Canvas snapshot says “current”', async () => {
+  const calls = [];
+  const question = ['Hello', '', 'Canvas workspace context (automatic): current snapshot of 1 files and 0 folders.', 'Selected Canvas file: index.html', 'Workspace files:', '- index.html'].join('\n');
+  await withServer(async (url, options) => {
+    calls.push({ url, options });
+    if (url.endsWith(':generateContent') || url === 'https://api.tavily.com/search') throw new Error('A greeting must not trigger planning or web search');
+    return stream('Hello!');
+  }, async (post) => {
+    const result = await post(body('auto', question));
+    assert.equal(result.status, 200);
+    const events = parseEvents(await result.text());
+    assert.deepEqual(events.map(({ type }) => type), ['start', 'search', 'search', 'delta', 'done']);
+    assert.deepEqual(events.filter(({ type }) => type === 'search').map(({ phase }) => phase), ['planning', 'skipped']);
+  });
+  assert.equal(calls.length, 1);
+  assert.ok(calls[0].url.endsWith(':streamGenerateContent?alt=sse'));
+  assert.ok(JSON.parse(calls[0].options.body).contents[0].parts[0].text.includes('Canvas workspace context (automatic)'));
+});
+
 test('Auto forces a live lookup for current UI-library trends even when the model planner opts out', async () => {
   const calls = [];
   const question = 'Which React UI libraries are trending for web design right now?';

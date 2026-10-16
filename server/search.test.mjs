@@ -53,6 +53,29 @@ test('parses AI tool calls and explicit opt-outs for OpenAI-compatible, Gemini a
   assert.equal(parseSearchDecision('groq', { choices: [{ message: { content: 'I will look that up' } }] }), undefined);
 });
 
+test('search planning ignores appended Canvas contents and skips trivial greetings', async () => {
+  const content = ['Hello', '', 'Canvas workspace context (automatic): current snapshot of 1 files and 0 folders.', 'Selected Canvas file: index.html', 'Workspace files:', '- index.html', 'Current source code here.'].join('\n');
+  const request = buildSearchPlanRequest(input('gemini', content), 'key', '');
+  const plannerText = JSON.parse(request.options.body).contents[0].parts[0].text;
+  assert.ok(plannerText.includes('User request: "Hello"'));
+  assert.equal(plannerText.includes('Canvas workspace context'), false);
+  assert.equal(plannerText.includes('current snapshot'), false);
+  assert.equal(plannerText.includes('index.html'), false);
+
+  const currentQuestion = ['What is the latest React release?', '', 'Canvas workspace context (automatic): current snapshot of 1 files and 0 folders.', 'Selected Canvas file: index.html', 'Current source code here.'].join('\n');
+  const currentPlan = buildSearchPlanRequest(input('gemini', currentQuestion), 'key', '');
+  const currentPlannerText = JSON.parse(currentPlan.options.body).contents[0].parts[0].text;
+  assert.ok(currentPlannerText.includes('User request: "What is the latest React release?"'));
+  assert.equal(currentPlannerText.includes('Canvas workspace context'), false);
+  assert.equal(currentPlannerText.includes('Current source code'), false);
+
+  let calls = 0;
+  for (const mode of ['auto', 'always']) {
+    assert.equal(await planWebSearch(input('gemini', content, mode), 'key', '', { fetchImpl: async () => { calls++; throw new Error('Greeting should not trigger search planning'); } }), null);
+  }
+  assert.equal(calls, 0);
+});
+
 test('Auto respects ordinary skips but guarantees live lookup for current library and design-trend requests', async () => {
   const latest = input('gemini', 'Find the latest React release');
   const trending = input('gemini', 'What are the best current React UI libraries for web design?');

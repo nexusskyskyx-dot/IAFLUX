@@ -23,9 +23,12 @@ const TOOL = {
 export { SEARCH_SYSTEM_NOTE } from './assistant-profile.mjs';
 
 function latestQuestion(input) {
-  // File attachments appended by the client can contain proprietary code.
+  // The final user turn also contains client-appended Canvas snapshots and
+  // attachments. Search only the user's actual request, never workspace data.
   const content = input.messages.at(-1)?.content || '';
-  return content.split(/\n\nAttached file:/i)[0].replace(/```[\s\S]*?```/g, '[code omitted]').trim().slice(0, 900);
+  const contextStart = content.search(/\n{1,2}(?:Canvas workspace context \(automatic\):|Canvas file attached for editing:|Canvas file attached for context only \(partial\):|Attached file:)/i);
+  const request = contextStart >= 0 ? content.slice(0, contextStart) : content;
+  return request.replace(/(`{3,}|~{3,})[\s\S]*?\1/g, '[code omitted]').trim().slice(0, 900);
 }
 
 export function normalizeSearchQuery(value) {
@@ -45,6 +48,11 @@ function requiresCurrentLibrarySearch(question) {
 
 export function likelyNeedsSearch(question) {
   return requiresCurrentLibrarySearch(question) || /\b(?:search|look up|find online|browse|web|internet|today|tonight|yesterday|tomorrow|latest|recent|current|right now|this week|this month|news|weather|price|release|updated|up.to.date|as of|202[5-9])\b/i.test(question);
+}
+
+function isTrivialGreeting(question) {
+  const clean = question.toLowerCase().replace(/[!?.,:;]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return /^(?:hi|hello|hey|yo|hola|good morning|good afternoon|good evening|good night|thanks|thank you|thx|ok|okay|got it|test|ping)(?: (?:there|aiflux|assistant))?$/.test(clean);
 }
 
 export function buildSearchPlanRequest(input, key, ollamaBaseUrl, now = new Date()) {
@@ -90,6 +98,9 @@ export function parseSearchDecision(provider, payload) {
 export async function planWebSearch(input, key, ollamaBaseUrl, { signal, fetchImpl = fetch } = {}) {
   if (input.searchMode === 'off') return null;
   const question = latestQuestion(input);
+  // There is no useful query for a greeting, even in Always mode. This avoids
+  // charging a planner/search call for casual conversation.
+  if (isTrivialGreeting(question)) return null;
   const fallback = normalizeSearchQuery(question.replace(/\s+/g, ' ').slice(0, 180));
   const useFallback = () => input.searchMode === 'always' || likelyNeedsSearch(question) ? fallback : null;
   const plan = buildSearchPlanRequest(input, key, ollamaBaseUrl);
