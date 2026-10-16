@@ -73,7 +73,21 @@ test('reload, new tab and close are all reachable', () => {
   const html = render();
   assert.match(html, /aria-label="Reload the page"/);
   assert.match(html, /aria-label="Open in a new browser tab"/);
-  assert.match(html, /aria-label="Close full preview \(Esc\)"/);
+  assert.match(html, /aria-label="Exit full preview \(Esc\)"/);
+});
+
+test('the way out is labelled, not just another icon', () => {
+  const html = render();
+  // Three identical icon buttons gave no clue which one was the exit, so the
+  // exit carries a word and its own styling, and the footer repeats the hint.
+  assert.match(html, /class="full-preview-exit"[^>]*>[\s\S]*?Exit/, 'it says "Exit"');
+  assert.match(html, /<kbd>Esc<\/kbd>/, 'and names the keyboard shortcut on the button');
+  assert.match(html, /Press <kbd>Esc<\/kbd> or use Exit to close/);
+
+  const exit = html.match(/<button[^>]*class="full-preview-exit"[\s\S]*?<\/button>/)?.[0] || '';
+  assert.ok(!/class="full-preview-icon"/.test(exit), 'the exit is not styled like the other two');
+  const icons = [...html.matchAll(/class="full-preview-icon"/g)].length;
+  assert.equal(icons, 2, 'reload and new tab stay icon-only, so the exit stands apart');
 });
 
 test('the overlay says what the sandbox does and does not allow', () => {

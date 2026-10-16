@@ -69,9 +69,14 @@ export function FullPreviewPanel({ preview, device, onDevice, onRefresh, onClose
       </div>
 
       <div className="full-preview-actions">
-        <button onClick={onRefresh} title="Reload the page" aria-label="Reload the page"><RefreshCw size={15} /></button>
-        <button onClick={openInNewTab} title="Open in a new browser tab" aria-label="Open in a new browser tab"><ExternalLink size={15} /></button>
-        <button ref={closeRef} onClick={onClose} title="Close full preview (Esc)" aria-label="Close full preview (Esc)"><X size={17} /></button>
+        <button onClick={onRefresh} className="full-preview-icon" title="Reload the page" aria-label="Reload the page"><RefreshCw size={15} /></button>
+        <button onClick={openInNewTab} className="full-preview-icon" title="Open in a new browser tab" aria-label="Open in a new browser tab"><ExternalLink size={15} /></button>
+        {/* Spelled out, and the only labelled button here. Three identical
+            icon buttons gave no clue which one was the way out, and a preview
+            you cannot find your way out of is a trap. */}
+        <button ref={closeRef} onClick={onClose} className="full-preview-exit" title="Exit full preview (Esc)" aria-label="Exit full preview (Esc)">
+          <X size={15} />Exit<kbd>Esc</kbd>
+        </button>
       </div>
     </div>
 
@@ -85,7 +90,7 @@ export function FullPreviewPanel({ preview, device, onDevice, onRefresh, onClose
 
     <div className="full-preview-foot">
       <span>{width ? `${width}px — the layout at this width is what a visitor on that device sees.` : 'Filling the window.'}</span>
-      <span>Sandboxed: no network, no access to your workspace.</span>
+      <span>Press <kbd>Esc</kbd> or use Exit to close · Sandboxed: no network, no access to your workspace.</span>
     </div>
   </div>;
 }
