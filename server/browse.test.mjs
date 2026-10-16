@@ -416,3 +416,23 @@ test('a gallery name is not guessed from a short or unrelated domain', () => {
   );
   assert.equal(refs[0].name, 'X', 'too short to match anything, so the domain stands');
 });
+
+test('a slow robots.txt does not starve the page it is gating', async () => {
+  // robots.txt was allowed five of the six seconds, so a site that took four
+  // seconds to serve it left the page to time out — which reads, from the
+  // outside, exactly like the site refusing us.
+  const pageMs = 3_000;
+  const robotsMs = 4_000;
+  const started = Date.now();
+  const result = await withServer((req, res) => {
+    const delay = req.url === '/robots.txt' ? robotsMs : pageMs;
+    setTimeout(() => {
+      if (req.url === '/robots.txt') { res.writeHead(200, { 'content-type': 'text/plain' }); res.end('User-agent: *\nAllow: /\n'); return; }
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end('<html><head><title>Slow to permit, quick to serve</title></head><body>Hello</body></html>');
+    }, delay);
+  }, async (base) => browse(`${base}/`, { timeoutMs: 6_000, allowPrivateAddresses: true }));
+  assert.equal(result.ok, true, 'the page is read despite the slow robots.txt');
+  assert.match(result.design.title, /Slow to permit/);
+  assert.ok(Date.now() - started < 6_000, 'and inside the budget');
+});

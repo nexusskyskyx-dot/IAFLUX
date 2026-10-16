@@ -40,6 +40,13 @@ const GALLERY_BY_REQUEST = [
   [/landing|home ?page|hero|splash|website|site|web ?page/i, 'https://land-book.com/design/landing-page'],
 ];
 
+/**
+ * Tried when the gallery matching the request cannot be read. One site being
+ * unreachable — slow, blocking us, or down — should not cost the model its
+ * references entirely.
+ */
+export const FALLBACK_GALLERY = 'https://godly.design/';
+
 export function galleryUrlFor(text = '') {
   const value = String(text || '');
   for (const [pattern, url] of GALLERY_BY_REQUEST) {
@@ -87,7 +94,10 @@ export async function primeDesignReferences(text, options = {}) {
     }
   };
 
-  const gallery = await attempt(galleryUrl);
+  let gallery = await attempt(galleryUrl);
+  // Both attempts stay in `fetched`, so the chips show that the first gallery
+  // was tried and did not answer, and that another one was tried after it.
+  if (!gallery) gallery = await attempt(FALLBACK_GALLERY);
   if (gallery) {
     // The gallery's own page is mostly navigation; the sites it points at are
     // the work. Two of them, from different studios, so the model sees a

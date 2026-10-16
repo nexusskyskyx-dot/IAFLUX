@@ -114,8 +114,8 @@ test('a gallery that cannot be read degrades to no note but still reports the at
   });
   assert.notEqual(primed, null, 'the attempt is returned');
   assert.equal(primed.note, '', 'no references means no note, and the model falls back on the playbook');
-  assert.equal(primed.results.length, 1);
-  assert.equal(primed.results[0].ok, false);
+  assert.equal(primed.results.length, 2, 'the matching gallery, then a different one tried after it');
+  assert.deepEqual(primed.results.map((r) => r.ok), [false, false]);
   assert.match(primed.results[0].error, /offline/, 'with the reason, so the user can see what happened');
 });
 
@@ -132,7 +132,7 @@ test('a failed attempt is not cached, so it can succeed on the next message', as
   const browseImpl = async () => { calls += 1; return { ok: false, error: 'offline' }; };
   await primeDesignReferences('landing page', { browseImpl });
   await primeDesignReferences('landing page', { browseImpl });
-  assert.equal(calls, 2, 'it tries again rather than remembering the failure');
+  assert.equal(calls, 4, 'two galleries per attempt, twice over — it tries again rather than remembering the failure');
 });
 
 test('a gallery that loads but has no featured site still counts', async () => {
@@ -225,4 +225,18 @@ test('the foundation is built from the featured sites, not the gallery', async (
   assert.match(entry.foundation, /--accent: #ff5a1f/, 'the featured site\'s accent');
   assert.match(entry.foundation, /--display: "Space Grotesk"/, 'and its type');
   assert.match(entry.foundation, /read from the pages above/);
+});
+
+test('a gallery that cannot be read does not cost the request its references', async () => {
+  // One site being unreachable — slow, blocking us, or simply down — should
+  // not leave the model with nothing.
+  const entry = await primeDesignReferences('make me a landing page', {
+    browseImpl: async (url) => (url === 'https://godly.design/'
+      ? galleryResult('https://godly.design/', [{ name: 'Zaro', url: 'https://zaro.ai/', external: true }])
+      : { ok: false, url, error: 'godly.design could not be reached.' }),
+  });
+  assert.ok(entry.note.includes('https://godly.design/'), 'the other gallery was tried');
+  assert.equal(entry.results.length, 3, 'and both attempts are reported, so the failure is visible');
+  assert.equal(entry.results[0].ok, false);
+  assert.equal(entry.results[1].ok, true);
 });

@@ -592,7 +592,13 @@ export async function browse(rawUrl, options = {}) {
     visited.add(url.toString());
 
     if (checkRobots) {
-      const entry = await fetchRobots(url.origin, { fetchImpl, timeoutMs: Math.min(5_000, timeoutMs) });
+      // robots.txt must not eat the budget the page itself needs. It used to be
+      // allowed five of the six seconds, so a slow robots.txt left the page to
+      // time out — which is indistinguishable, from the outside, from the site
+      // refusing us. A third of the budget at most; if it cannot be read in
+      // time we fail open, exactly as we already do when it is unreachable.
+      const robotsBudget = Math.max(1_000, Math.min(5_000, Math.floor(timeoutMs / 3)));
+      const entry = await fetchRobots(url.origin, { fetchImpl, timeoutMs: robotsBudget });
       const path = url.pathname + url.search;
       if (entry.state === 'disallowed' || !robotsAllows(entry.groups, path, BROWSE_USER_AGENT)) {
         return {

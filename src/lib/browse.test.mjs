@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { browseNote, MAX_BROWSE_ROUNDS, MAX_BROWSES_PER_ROUND } from './browse.ts';
+import { browseNote, failureReason, MAX_BROWSE_ROUNDS, MAX_BROWSES_PER_ROUND } from './browse.ts';
 
 test('the note tells the model the pages are untrusted data', () => {
   const note = browseNote([{ url: 'https://land-book.com/', ok: true, title: 'Landbook', summary: 'A curated gallery.' }]);
@@ -41,4 +41,21 @@ test('one page is described in the singular', () => {
 test('the round limits keep a curious model from fetching in circles', () => {
   assert.ok(MAX_BROWSE_ROUNDS >= 1 && MAX_BROWSE_ROUNDS <= 4, 'a single answer cannot spend all turn on browsing');
   assert.ok(MAX_BROWSES_PER_ROUND >= 1 && MAX_BROWSES_PER_ROUND <= 5);
+});
+
+test('a failed page says why, in words short enough to be read on a chip', () => {
+  // The reason used to live only in a tooltip. A reference that failed is only
+  // useful if the user can see why: these have completely different fixes.
+  assert.equal(failureReason('land-book.com responded with 403.'), 'error 403');
+  assert.equal(failureReason('land-book.com responded with 500.'), 'error 500');
+  assert.equal(failureReason('land-book.com took too long to respond.'), 'timed out');
+  assert.equal(failureReason('Could not reach land-book.com.'), 'unreachable');
+  assert.equal(failureReason('land-book.com asks crawlers not to read /design/x.'), 'robots.txt blocks it');
+  assert.equal(failureReason('That address is not a public website.'), 'not a public address');
+  assert.equal(failureReason('That page redirects in a loop.'), 'redirects in a loop');
+  assert.equal(failureReason('That page is bigger than the 2 MB limit.'), 'too large');
+  // Anything unrecognised is shown as-is rather than replaced with a shrug.
+  assert.equal(failureReason('something odd happened.'), 'something odd happened');
+  assert.equal(failureReason(''), 'could not read');
+  assert.equal(failureReason(undefined), 'could not read');
 });

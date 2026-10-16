@@ -7,6 +7,7 @@ import { LogoMark, ProviderIcon } from './Brand';
 import ModelPicker from './ModelPicker';
 import { copyToClipboard } from '../lib/clipboard.ts';
 import { MAX_CONTINUATIONS } from '../lib/continuation';
+import { failureReason } from '../lib/browse';
 
 interface Props {
   conversation: Conversation;
@@ -93,7 +94,7 @@ function BrowseChips({ message }: { message: ChatMessage }) {
     >
       {result.ok ? <Globe2 size={13} /> : <X size={13} />}
       <span className="browse-chip-host">{host}</span>
-      <span className="browse-chip-state">{result.ok ? (result.title || 'read') : 'could not read'}</span>
+      <span className="browse-chip-state">{result.ok ? (result.title || 'read') : failureReason(result.error)}</span>
       <ArrowUpRight size={12} />
     </a>;
   })}</div>;
