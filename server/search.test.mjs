@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { validateChat } from './providers.mjs';
 import {
   buildSearchPlanRequest, likelyNeedsSearch, normalizeSearchQuery, normalizeSearchResults,
-  parseSearchDecision, planWebSearch, searchWeb, withSearchContext,
+  parseSearchDecision, planWebSearch, searchWeb, shouldSkipSearchPlanning, withSearchContext,
 } from './search.mjs';
 
 const modelIds = {
@@ -14,9 +14,10 @@ const modelIds = {
   ollama: 'qwen3:latest',
 };
 const xkiroFreeModelIds = new Set([modelIds.xkiro]);
-const input = (provider, question, searchMode = 'auto') => validateChat({
+const input = (provider, question, searchMode = 'auto', searchQuestion) => validateChat({
   provider, model: modelIds[provider], searchMode,
   messages: [{ role: 'user', content: question }],
+  ...(searchQuestion !== undefined ? { searchQuestion } : {}),
 }, provider === 'ollama', xkiroFreeModelIds);
 const response = (value, status = 200) => new Response(typeof value === 'string' ? value : JSON.stringify(value), { status });
 
@@ -63,11 +64,14 @@ test('search planning ignores appended Canvas contents and skips trivial greetin
   assert.equal(plannerText.includes('index.html'), false);
 
   const currentQuestion = ['What is the latest React release?', '', 'Canvas workspace context (automatic): current snapshot of 1 files and 0 folders.', 'Selected Canvas file: index.html', 'Current source code here.'].join('\n');
-  const currentPlan = buildSearchPlanRequest(input('gemini', currentQuestion), 'key', '');
+  const currentPlan = buildSearchPlanRequest(input('gemini', currentQuestion, 'auto', 'What is the latest React release?'), 'key', '');
   const currentPlannerText = JSON.parse(currentPlan.options.body).contents[0].parts[0].text;
   assert.ok(currentPlannerText.includes('User request: "What is the latest React release?"'));
   assert.equal(currentPlannerText.includes('Canvas workspace context'), false);
   assert.equal(currentPlannerText.includes('Current source code'), false);
+  assert.equal(shouldSkipSearchPlanning({ searchQuestion: 'Hello', messages: [{ role: 'user', content }] }), true);
+  assert.equal(shouldSkipSearchPlanning({ messages: [{ role: 'user', content }] }), true);
+  assert.equal(shouldSkipSearchPlanning({ searchQuestion: 'What is the latest React release?', messages: [{ role: 'user', content: currentQuestion }] }), false);
 
   let calls = 0;
   for (const mode of ['auto', 'always']) {

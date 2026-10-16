@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applyWorkspaceOperations, buildCanvasContext, buildPreview, downloadProject, extractCodeFiles, extractWorkspaceOperations, filterWorkspaceOperationsForRequest, mergeGeneratedFiles, normalizeWorkspaceOperationOutput, requestsCanvasMutation, safeFilename, toProviderMessages } from './files.ts';
+import { applyWorkspaceOperations, buildCanvasContext, buildPreview, downloadProject, extractCodeFiles, extractWorkspaceOperations, filterWorkspaceOperationsForRequest, mergeGeneratedFiles, normalizeWorkspaceOperationOutput, requestsCanvasEdit, requestsCanvasMutation, safeFilename, toProviderMessages } from './files.ts';
 
 const file = (name, content, origin = 'user') => ({ id: name, name, content, origin });
 
@@ -38,6 +38,28 @@ test('AI edits only the authorized unchanged Canvas file and preserves a diff ba
   assert.equal(mergeGeneratedFiles(changedSinceAttach, version)[0].content, 'const value = 3;');
   assert.equal(mergeGeneratedFiles(changedSinceAttach, version)[1].content, 'const value = 2;');
   assert.deepEqual(extractCodeFiles(markdown, [], [target]), [], 'a deleted or renamed snapshot file is not resurrected by a stale response');
+});
+
+test('captures standalone code in Canvas and routes unnamed edit replies to the selected file', () => {
+  const rawPage = 'Here is your page:\n\nindex.html\n<!doctype html>\n<html><body><main><h1>Hello</h1></main></body></html>';
+  const created = extractCodeFiles(rawPage, [], [], true);
+  assert.equal(created.length, 1);
+  assert.equal(created[0].name, 'index.html');
+  assert.match(created[0].content, /<h1>Hello<\/h1>/);
+
+  const existing = [file('index.html', '<html><body>Before</body></html>')];
+  const target = { id: existing[0].id, name: existing[0].name, content: existing[0].content };
+  const fencedEdit = extractCodeFiles('```html\n<html><body><h1>Fenced edit</h1></body></html>\n```', existing, [target], true, true);
+  assert.equal(fencedEdit[0].id, target.id);
+  assert.equal(fencedEdit[0].content, '<html><body><h1>Fenced edit</h1></body></html>');
+  const rawEdit = extractCodeFiles('Updated page:\n<html><body><h1>Raw edit</h1></body></html>', existing, [target], true, true);
+  assert.equal(rawEdit[0].id, target.id);
+  assert.equal(rawEdit[0].name, 'index.html');
+  assert.equal(rawEdit[0].previousContent, existing[0].content);
+  assert.equal(mergeGeneratedFiles(existing, rawEdit)[0].content, '<html><body><h1>Raw edit</h1></body></html>');
+
+  assert.deepEqual(extractCodeFiles('This explanation mentions const value = 1, but is not a file.', [], [], true), []);
+  assert.deepEqual(extractCodeFiles(rawPage, [], [], false), []);
 });
 
 test('sanitizes file names, infers snippet extensions, and recognizes tilde/long Markdown fences', () => {
@@ -115,6 +137,10 @@ test('AI workspace operations create, rename, and soft-delete files and folders 
   assert.equal(requestsCanvasMutation("Don't edit anything; just explain what this file does."), false);
   assert.equal(requestsCanvasMutation('Add a pricing page and update the navigation'), true);
   assert.equal(requestsCanvasMutation('Generate code for a new page'), true);
+  assert.equal(requestsCanvasEdit('Update the current file with a new heading'), true);
+  assert.equal(requestsCanvasEdit('Add a button to the current page'), true);
+  assert.equal(requestsCanvasEdit('Generate a new page'), false);
+  assert.equal(requestsCanvasEdit("Don't edit the current file"), false);
   const authorized = filterWorkspaceOperationsForRequest(operations, 'Create an assets folder and delete the old source file');
   assert.deepEqual(authorized.map((item) => item.type), ['create-folder', 'delete-file', 'delete-folder']);
   assert.deepEqual(filterWorkspaceOperationsForRequest(operations, "Don't delete or rename anything; only explain."), []);

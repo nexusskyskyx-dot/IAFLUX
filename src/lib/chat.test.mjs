@@ -29,8 +29,9 @@ test('client forwards web preference and optional search key, then reads interle
     );
   };
   try {
-    await requestChat(args(events));
+    await requestChat(args(events, { searchQuestion: 'What is new this week?' }));
     assert.equal(sent.url, '/api/chat');
+    assert.equal(JSON.parse(sent.options.body).searchQuestion, 'What is new this week?');
     assert.equal(sent.options.headers['x-aiflux-key'], 'model-key');
     assert.equal(sent.options.headers['x-aiflux-search-key'], 'search-key');
     assert.equal(sent.options.headers['x-aiflux-access-code'], 'workspace-code');

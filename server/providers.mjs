@@ -24,7 +24,10 @@ export function validateChat(body, ollamaConfigured = false, xkiroFreeModelIds =
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     throw new RequestError(400, 'Invalid request.');
   }
-  const { provider, model, messages, searchMode = 'off' } = body;
+  const { provider, model, messages, searchMode = 'off', searchQuestion } = body;
+  if (searchQuestion !== undefined && (typeof searchQuestion !== 'string' || searchQuestion.length > 180_000)) {
+    throw new RequestError(400, 'Invalid search question.');
+  }
   if (!['off', 'auto', 'always'].includes(searchMode)) {
     throw new RequestError(400, 'Choose a valid web search mode.');
   }
@@ -67,7 +70,7 @@ export function validateChat(body, ollamaConfigured = false, xkiroFreeModelIds =
   if (totalLength > 180_000 || cleanMessages.at(-1).role !== 'user') {
     throw new RequestError(400, 'Conversation is too long or does not end with a user message. Start a new chat or shorten the context.');
   }
-  return { provider, model, messages: cleanMessages, searchMode };
+  return { provider, model, messages: cleanMessages, searchMode, ...(searchQuestion !== undefined ? { searchQuestion } : {}) };
 }
 
 export function buildRequest({ provider, model, messages, searchMode = 'off', searchPerformed = false, systemPrompt }, key, ollamaBaseUrl) {

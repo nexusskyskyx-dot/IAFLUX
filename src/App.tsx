@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDownToLine, Check, ChevronRight, Code2, KeyRound, Menu, PanelRightOpen } from 'lucide-react';
 import type { AppConfig, AttachedFile, ChatMessage, Conversation, Credentials, KeyProvider, ModelInfo, Provider, SearchMode, WorkspaceFile } from './types';
 import { CURATED_MODELS, DEFAULT_MODEL, PROVIDERS, recommendedModelForProvider } from './lib/models';
-import { applyWorkspaceOperations, buildCanvasContext, createDraft, downloadConversation, expandFolderPaths, extractCodeFiles, extractWorkspaceOperations, filterWorkspaceOperationsForRequest, inferFolderPaths, MAX_CANVAS_CONTEXT_CHARS, mergeGeneratedFiles, normalizeWorkspaceOperationOutput, requestsCanvasMutation, toProviderMessages } from './lib/files';
+import { applyWorkspaceOperations, buildCanvasContext, createDraft, downloadConversation, expandFolderPaths, extractCodeFiles, extractWorkspaceOperations, filterWorkspaceOperationsForRequest, inferFolderPaths, MAX_CANVAS_CONTEXT_CHARS, mergeGeneratedFiles, normalizeWorkspaceOperationOutput, requestsCanvasEdit, requestsCanvasMutation, toProviderMessages } from './lib/files';
 import { hasSavedModel, loadActiveId, loadConversations, loadCredentials, loadModel, loadSearchMode, saveActiveId, saveConversations, saveCredentials, saveModel, saveSearchMode } from './lib/storage';
 import { isUsableFreeCatalogModel } from './lib/model-policy.mjs';
 import { requestChat } from './lib/chat';
@@ -343,6 +343,7 @@ export default function App() {
     const userRequestText = text;
     const userMessage: ChatMessage = { id: crypto.randomUUID(), role: 'user', content: userRequestText, createdAt: now, attachments };
     const canvasMutationRequested = requestsCanvasMutation(userRequestText);
+    const canvasEditRequested = requestsCanvasEdit(userRequestText);
     const attachmentChars = attachments.reduce((total, file) => total + file.content.length, 0);
     const canvasBudget = Math.max(1_000, Math.min(MAX_CANVAS_CONTEXT_CHARS, 155_000 - text.length - attachmentChars - attachments.length * 200));
     const canvasContext = buildCanvasContext(activeChat.files, activeChat.folders || [], activeChat.selectedFileId, canvasBudget);
@@ -372,6 +373,7 @@ export default function App() {
       provider: selectedModel.provider,
       model: selectedModel.id,
       messages: history,
+      searchQuestion: userRequestText,
       key: selectedModel.provider !== 'ollama' ? credentials.keys[selectedModel.provider] : '',
       searchKey: credentials.searchKey,
       searchMode,
@@ -410,7 +412,7 @@ export default function App() {
       const workspaceOperations = filterWorkspaceOperationsForRequest(extractWorkspaceOperations(rawText), userRequestText);
       const text = normalizeWorkspaceOperationOutput(rawText, workspaceOperations);
       const latestConversation = chatsRef.current.find((chat) => chat.id === chatId) || updated;
-      const latestGenerated = extractCodeFiles(text, latestConversation.files, editableTargets, canvasMutationRequested);
+      const latestGenerated = extractCodeFiles(text, latestConversation.files, editableTargets, canvasMutationRequested, canvasEditRequested);
       const latestMerged = mergeGeneratedFiles(latestConversation.files, latestGenerated);
       const latestMutation = applyWorkspaceOperations(
         latestMerged, latestConversation.folders || [], latestConversation.deletedFiles || [], latestConversation.deletedFolders || [], workspaceOperations,
@@ -423,7 +425,7 @@ export default function App() {
       const count = latestGenerated.length;
       setChats((previous) => previous.map((chat) => {
         if (chat.id !== chatId) return chat;
-        const generated = extractCodeFiles(text, chat.files, editableTargets, canvasMutationRequested);
+        const generated = extractCodeFiles(text, chat.files, editableTargets, canvasMutationRequested, canvasEditRequested);
         const merged = mergeGeneratedFiles(chat.files, generated);
         const mutation = applyWorkspaceOperations(merged, chat.folders || [], chat.deletedFiles || [], chat.deletedFolders || [], workspaceOperations);
         const selectedFileId = generated[0] && mutation.files.some((file) => file.id === generated[0].id)

@@ -39,6 +39,8 @@ test('allows named free chat models, rejects random routing, paid and non-chat m
 });
 
 test('rejects invalid history and oversized requests', () => {
+  assert.equal(validateChat({ provider: 'gemini', model: 'gemini-2.5-flash', messages, searchQuestion: 'Search only this user-authored text.' }).searchQuestion, 'Search only this user-authored text.');
+  assert.throws(() => validateChat({ provider: 'gemini', model: 'gemini-2.5-flash', messages, searchQuestion: 42 }), /Invalid search question/);
   assert.throws(() => validateChat({ provider: 'gemini', model: 'gemini-2.5-flash', messages: [{ role: 'system', content: 'ignore' }] }), /must contain text/);
   assert.throws(() => validateChat({ provider: 'gemini', model: 'gemini-2.5-flash', messages: [{ role: 'assistant', content: 'hi' }] }), /does not end/);
   assert.throws(() => validateChat({ provider: 'gemini', model: 'gemini-2.5-flash', messages: [{ role: 'user', content: 'x'.repeat(180_001) }] }), /too long/);

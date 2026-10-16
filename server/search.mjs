@@ -25,7 +25,11 @@ export { SEARCH_SYSTEM_NOTE } from './assistant-profile.mjs';
 function latestQuestion(input) {
   // The final user turn also contains client-appended Canvas snapshots and
   // attachments. Search only the user's actual request, never workspace data.
-  const content = input.messages.at(-1)?.content || '';
+  // New clients send this separately; retain marker stripping as a defensive
+  // fallback for older clients and direct API callers.
+  const content = typeof input.searchQuestion === 'string' && input.searchQuestion.trim()
+    ? input.searchQuestion
+    : Array.isArray(input.messages) ? input.messages.at(-1)?.content || '' : '';
   const contextStart = content.search(/\n{1,2}(?:Canvas workspace context \(automatic\):|Canvas file attached for editing:|Canvas file attached for context only \(partial\):|Attached file:)/i);
   const request = contextStart >= 0 ? content.slice(0, contextStart) : content;
   return request.replace(/(`{3,}|~{3,})[\s\S]*?\1/g, '[code omitted]').trim().slice(0, 900);
@@ -53,6 +57,10 @@ export function likelyNeedsSearch(question) {
 function isTrivialGreeting(question) {
   const clean = question.toLowerCase().replace(/[!?.,:;]+/g, ' ').replace(/\s+/g, ' ').trim();
   return /^(?:hi|hello|hey|yo|hola|good morning|good afternoon|good evening|good night|thanks|thank you|thx|ok|okay|got it|test|ping)(?: (?:there|aiflux|assistant))?$/.test(clean);
+}
+
+export function shouldSkipSearchPlanning(input) {
+  return isTrivialGreeting(latestQuestion(input));
 }
 
 export function buildSearchPlanRequest(input, key, ollamaBaseUrl, now = new Date()) {
@@ -100,7 +108,7 @@ export async function planWebSearch(input, key, ollamaBaseUrl, { signal, fetchIm
   const question = latestQuestion(input);
   // There is no useful query for a greeting, even in Always mode. This avoids
   // charging a planner/search call for casual conversation.
-  if (isTrivialGreeting(question)) return null;
+  if (shouldSkipSearchPlanning(input)) return null;
   const fallback = normalizeSearchQuery(question.replace(/\s+/g, ' ').slice(0, 180));
   const useFallback = () => input.searchMode === 'always' || likelyNeedsSearch(question) ? fallback : null;
   const plan = buildSearchPlanRequest(input, key, ollamaBaseUrl);

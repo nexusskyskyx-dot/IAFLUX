@@ -12,9 +12,10 @@ const [{ default: chatHandler }, { default: modelsHandler }] = await Promise.all
 ]);
 const nativeFetch = globalThis.fetch;
 
-const body = (searchMode, question = 'What is the current React release?') => ({
+const body = (searchMode, question = 'What is the current React release?', searchQuestion) => ({
   provider: 'gemini', model: 'gemini-2.5-flash', searchMode,
   messages: [{ role: 'user', content: question }],
+  ...(searchQuestion !== undefined ? { searchQuestion } : {}),
 });
 const json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
 const stream = (text) => new Response(`data: ${JSON.stringify({ candidates: [{ content: { parts: [{ text }] } }] })}\n\ndata: [DONE]\n\n`, { headers: { 'Content-Type': 'text/event-stream' } });
@@ -155,7 +156,7 @@ test('Auto does not search a greeting because the appended Canvas snapshot says 
     if (url.endsWith(':generateContent') || url === 'https://api.tavily.com/search') throw new Error('A greeting must not trigger planning or web search');
     return stream('Hello!');
   }, async (post) => {
-    const result = await post(body('auto', question));
+    const result = await post(body('auto', question, 'Hello'));
     assert.equal(result.status, 200);
     const events = parseEvents(await result.text());
     assert.deepEqual(events.map(({ type }) => type), ['start', 'search', 'search', 'delta', 'done']);
@@ -286,18 +287,33 @@ test('always mode keeps AIFLUX identity and acknowledges when no safe search was
   assert.doesNotMatch(prompt, /The server ran a live web search/);
 });
 
-test('best-effort per-IP limit caps attempts to use web search', async () => {
-  await withServer(() => { throw new Error('Invalid requests should not call upstreams'); }, async (post) => {
-    let limited = false;
+test('best-effort per-IP limit caps actual live searches, not Auto requests that skip search', async () => {
+  await withServer(async (url) => {
+    if (url.endsWith(':generateContent')) return json({ candidates: [{ content: { parts: [{ functionCall: { name: 'web_search', args: { query: 'React release' } } }] } }] });
+    if (url === 'https://api.tavily.com/search') return json({ results: [{ title: 'React', url: 'https://react.dev', content: 'Release notes.' }] });
+    return stream('Answer.');
+  }, async (post) => {
+    const greetingContext = ['Hello', '', 'Canvas workspace context (automatic): current snapshot of 1 files and 0 folders.', 'Selected Canvas file: index.html'].join('\n');
     for (let i = 0; i < 13; i++) {
-      const result = await post({ ...body('auto'), model: 'not-in-catalog!' });
-      if (result.status === 429) {
-        assert.match((await result.json()).error, /Too many web searches/);
+      const result = await post(body('auto', greetingContext, 'Hello'));
+      assert.equal(result.status, 200);
+      const events = parseEvents(await result.text());
+      assert.ok(events.some((event) => event.type === 'search' && event.phase === 'skipped'));
+      assert.equal(events.some((event) => event.type === 'sources'), false);
+    }
+    let limited = false;
+    for (let i = 0; i < 20; i++) {
+      const result = await post(body('always', 'Find the latest React release'));
+      assert.equal(result.status, 200);
+      const events = parseEvents(await result.text());
+      const error = events.find((event) => event.type === 'error');
+      if (error) {
+        assert.match(error.message, /Too many live web searches/);
         limited = true;
         break;
       }
-      assert.equal(result.status, 400);
+      assert.ok(events.some((event) => event.type === 'sources'));
     }
-    assert.ok(limited, 'A search limit should be reached within 13 requests from one IP');
+    assert.ok(limited, 'A live-search limit should be reached after enough actual searches');
   });
 });

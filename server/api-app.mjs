@@ -130,11 +130,14 @@ function rateLimit(req, res, next) {
     for (const [key, value] of limits) if (now - value.start > 10 * 60_000) limits.delete(key);
   }
   if (window.count > 60) return res.status(429).json({ error: 'Too many requests from this workspace. Please try again in a few minutes.' });
-  if (['auto', 'always'].includes(req.body?.searchMode)) {
-    window.searches = (window.searches || 0) + 1;
-    if (window.searches > 12) return res.status(429).json({ error: 'Too many web searches from this workspace. Try again in a few minutes.' });
-  }
   next();
+}
+
+function recordWebSearch(req) {
+  const window = limits.get(req.ip || 'unknown');
+  if (!window) return;
+  window.searches = (window.searches || 0) + 1;
+  if (window.searches > 12) throw new RequestError(429, 'Too many live web searches from this workspace. Try again in a few minutes.');
 }
 
 function correctAccessCode(candidate) {
@@ -190,6 +193,7 @@ app.post('/api/chat', rateLimit, async (req, res) => {
       sendEvent(res, { type: 'search', phase: 'planning' });
       const query = await planWebSearch(input, key, ollamaBaseUrl, { signal: controller.signal });
       if (query) {
+        recordWebSearch(req);
         sendEvent(res, { type: 'search', phase: 'searching', query });
         const sources = await searchWeb(query, suppliedSearchKey || envSearchKey, { signal: controller.signal });
         sendEvent(res, { type: 'sources', query, sources });

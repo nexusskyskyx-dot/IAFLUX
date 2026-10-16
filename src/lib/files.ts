@@ -74,6 +74,57 @@ export function fileColor(name: string): string {
   return 'muted';
 }
 
+function inferUnfencedCode(markdown: string): { content: string; language: string; filename?: string } | null {
+  const lines = markdown.replace(/\r\n?/g, '\n').split('\n');
+  let filename: string | undefined;
+  let start = -1;
+  let language = '';
+  let preambleLines = 0;
+  const fileHeading = /^(?:#{1,6}\s*)?(?:\*\*)?(?:(?:file|filename)\s*[:=]\s*)?([\w./-]+\.(?:html?|css|scss|js|jsx|ts|tsx|json|py|sh|svg|xml|sql|rs|go|java|ya?ml))(?:\*\*)?\s*:?$/i;
+
+  for (let index = 0; index < lines.length && index < 16; index++) {
+    const line = lines[index].trim();
+    if (!line) continue;
+    const heading = line.match(fileHeading);
+    if (heading && !filename) { filename = safeFilename(heading[1]); continue; }
+    if (/^(?:here(?:'s| is)|below is|updated code|updated file|the (?:complete )?(?:code|file)|code:|file:)\b/i.test(line)) {
+      preambleLines++;
+      continue;
+    }
+    if (/^\s*[{[]/.test(line)) {
+      const json = lines.slice(index).join('\n').trim();
+      try { JSON.parse(json); language = 'json'; start = index; break; } catch { /* Not a complete JSON file. */ }
+    }
+    if (/^<!doctype\s+html\b|^<html\b|^<body\b|^<(?:main|section|div|header|nav|button|form|article|head)\b/i.test(line)) language = 'html';
+    else if (/^<svg\b/i.test(line)) language = 'svg';
+    else if (/^(?:from\s+[\w.]+\s+import|def\s+\w+\s*\(|class\s+\w+\s*:|print\s*\()/i.test(line)) language = 'python';
+    else if (/^(?:#!.*\b(?:bash|sh)\b|set\s+-[a-z]|echo\s+)/i.test(line)) language = 'bash';
+    else if (/^(?:@(?:media|supports|keyframes|font-face)\b|:root\s*\{|(?:[a-z][\w-]*|\*|[.#][\w-]+)(?::[\w-]+)?\s*\{)/i.test(line)) language = 'css';
+    else if (/^(?:import\b.*\bfrom\b|export\b|const\b|let\b|var\b|function\b|async\s+function\b|class\b|interface\b|type\b|document\.|console\.|window\.|\/\/)/i.test(line)) language = /^(?:interface|type)\b/i.test(line) ? 'typescript' : 'javascript';
+    if (language) { start = index; break; }
+    preambleLines++;
+  }
+
+  if (start < 0 || preambleLines > 8) return null;
+  let codeLines = lines.slice(start);
+  const explanatoryTail = codeLines.findIndex((line, index) => index > 0 && /^(?:this (?:code|file)|to (?:use|run)|save this as|you can now|let me know|feel free|note:)\b/i.test(line.trim()));
+  if (explanatoryTail >= 0) codeLines = codeLines.slice(0, explanatoryTail);
+  const content = codeLines.join('\n').trim();
+  if (content.length < 8 || /```|~~~/.test(content)) return null;
+
+  if (language === 'json') {
+    try { JSON.parse(content); } catch { return null; }
+  } else {
+    const nonempty = content.split('\n').filter((line) => line.trim());
+    const codeLike = nonempty.filter((line) => /^\s*(?:<!doctype|<\/?[A-Za-z]|\/\*|\*|\/\/|#|@|[{}()[\]<>]|(?:const|let|var|function|class|interface|type|import|export|return|def|from|print|if|for|while|try|catch|async|await)\b)/i.test(line) || /[{};=]/.test(line));
+    if (!nonempty.length || codeLike.length / nonempty.length < 0.55) return null;
+    if (language === 'html' || language === 'svg') {
+      if (!/<[a-z][^>]*>/i.test(content) || !/<\//i.test(content) && !/\/>/.test(content)) return null;
+    } else if (language === 'css' && !/\{[\s\S]*\}/.test(content)) return null;
+  }
+  return { content, language, ...(filename ? { filename } : {}) };
+}
+
 function parseWorkspaceOperationsJson(value: string): { operations: unknown[] } | null {
   try {
     const parsed: unknown = JSON.parse(value);
@@ -102,6 +153,7 @@ export function extractCodeFiles(
   existing: WorkspaceFile[],
   editableTargets: Pick<WorkspaceFile, 'id' | 'name' | 'content'>[] = [],
   allowStarterReplacement = true,
+  preferEditableTarget = false,
 ): WorkspaceFile[] {
   const blocks = /^ {0,3}(`{3,}|~{3,})([^\n]*)\r?\n([\s\S]*?)\r?\n {0,3}\1[ \t]*$/gm;
   const found: WorkspaceFile[] = [];
@@ -115,7 +167,7 @@ export function extractCodeFiles(
     const filenameMatch = info.match(/(?:filename|file|title)\s*=\s*["']?([^\s"']+)/i);
     const colonMatch = info.match(/^\w+:([^\s]+)/);
     const commentMatch = content.match(/^(?:\/\/|#|<!--)\s*(?:file(?:name)?\s*:\s*)?([\w./-]+\.[a-z\d]+)(?:\s*-->)?\s*\n/i);
-    let name = safeFilename(filenameMatch?.[1] || colonMatch?.[1] || commentMatch?.[1] || `snippet-${found.length + 1}.${extensionFor(language)}`);
+    let name = safeFilename(filenameMatch?.[1] || colonMatch?.[1] || commentMatch?.[1] || (preferEditableTarget && found.length === 0 ? editableTargets[0]?.name : undefined) || `snippet-${found.length + 1}.${extensionFor(language)}`);
     if (commentMatch && !filenameMatch && !colonMatch) content = content.slice(commentMatch[0].length);
 
     const collision = [...existing, ...found].find((file) => file.name === name);
@@ -149,6 +201,33 @@ export function extractCodeFiles(
       previousContent = collision.content;
     }
     found.push({ id: crypto.randomUUID(), name, content, origin: 'generated', previousContent, lastChangedBy: 'ai' });
+  }
+  // A few providers return complete source without Markdown fences. Only recover
+  // a conservative, recognizable file when the user explicitly asked for a Canvas change.
+  if (!found.length && allowStarterReplacement) {
+    const raw = inferUnfencedCode(markdown);
+    if (raw && !parseWorkspaceOperationsJson(raw.content)) {
+      let name = safeFilename(raw.filename || (preferEditableTarget ? editableTargets[0]?.name : undefined) || `snippet-1.${extensionFor(raw.language)}`);
+      const collision = existing.find((file) => file.name === name);
+      if (editableTargets.some((target) => target.name === name) && !collision) return found;
+      const editTarget = collision && editableTargets.find((target) =>
+        target.id === collision.id && target.name === name && target.content === collision.content,
+      );
+      if (collision && editTarget) {
+        found.push({ id: collision.id, name, content: raw.content, origin: 'generated', previousContent: collision.content, lastChangedBy: 'ai' });
+      } else {
+        let previousContent = '';
+        if (collision && (collision.origin !== 'starter' || !allowStarterReplacement)) {
+          const dot = name.lastIndexOf('.');
+          const base = dot >= 0 ? name.slice(0, dot) : name;
+          const extension = dot >= 0 ? name.slice(dot) : '';
+          let version = 2;
+          while ([...existing, ...found].some((file) => file.name === `${base}-${version}${extension}`)) version++;
+          name = `${base}-${version}${extension}`;
+        } else if (collision) previousContent = collision.content;
+        found.push({ id: crypto.randomUUID(), name, content: raw.content, origin: 'generated', previousContent, lastChangedBy: 'ai' });
+      }
+    }
   }
   return found;
 }
@@ -300,6 +379,14 @@ export function requestsCanvasMutation(text: string): boolean {
   const informationalQuestion = /^\s*(?:how\b|what\b|why\b|which\b|explain\b|tell me\b|do you think\b|can you explain\b|could you explain\b|can you tell me\b|could you tell me\b)/i.test(text);
   if (informationalQuestion && !/\b(?:please|also|then)\b/i.test(text)) return false;
   return hasPositiveAction(text, /\b(?:edit\w*|chang\w*|modif\w*|updat\w*|fix(?:es|ed|ing)?|refactor\w*|rewrit\w*|redesign\w*|implement\w*|creat\w*|generat\w*|build\w*|add\w*|delet\w*|remov\w*|renam\w*|mov\w*|replac\w*|writ\w*|mak(?:e|es|ing)|new|convert\w*|styl\w*|improv\w*|edita\w*|cambi\w*|modific\w*|actualiz\w*|arregl\w*|refactoriza\w*|reescrib\w*|rediseñ\w*|implementa\w*|crea\w*|construy\w*|agreg\w*|elimin\w*|borr\w*|renombr\w*|muev\w*|reemplaz\w*|haz\w*|hag\w*)\b/gi);
+}
+
+export function requestsCanvasEdit(text: string): boolean {
+  if (!requestsCanvasMutation(text)) return false;
+  const directEdit = /\b(?:edit\w*|chang\w*|modif\w*|updat\w*|fix(?:es|ed|ing)?|refactor\w*|rewrit\w*|replac\w*|improv\w*|styl\w*|arregl\w*|modific\w*|actualiz\w*|arregl\w*|reescrib\w*)\b/gi;
+  const addToExisting = /\b(?:add|insert|put|include|place)\b.{0,100}\b(?:to|in|into|on|within)\s+(?:(?:the|this|current|selected|existing)\s+)?(?:file|page|app|website|site|component|canvas|code)\b/gi;
+  return hasPositiveAction(text, directEdit) || hasPositiveAction(text, addToExisting) ||
+    /\b(?:this|current|selected|existing)\s+(?:file|page|app|website|site|component|code)\b/i.test(text) && hasPositiveAction(text, /\b(?:add|insert|put|include|place|make|build|create)\w*\b/gi);
 }
 
 export function filterWorkspaceOperationsForRequest(operations: WorkspaceOperation[], request: string): WorkspaceOperation[] {

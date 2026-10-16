@@ -11,6 +11,8 @@ export async function requestChat(input: {
   provider: Provider;
   model: string;
   messages: { role: 'user' | 'assistant'; content: string }[];
+  /** The latest user-authored text, kept separate so Canvas/attachment context can never enter search planning. */
+  searchQuestion?: string;
   key: string;
   searchKey: string;
   searchMode: SearchMode;
@@ -26,7 +28,10 @@ export async function requestChat(input: {
       ...(input.searchMode !== 'off' && input.searchKey ? { 'x-aiflux-search-key': input.searchKey } : {}),
       ...(input.accessCode ? { 'x-aiflux-access-code': input.accessCode } : {}),
     },
-    body: JSON.stringify({ provider: input.provider, model: input.model, messages: input.messages, searchMode: input.searchMode }),
+    body: JSON.stringify({
+      provider: input.provider, model: input.model, messages: input.messages, searchMode: input.searchMode,
+      ...(input.searchQuestion !== undefined ? { searchQuestion: input.searchQuestion } : {}),
+    }),
     signal: input.signal,
   });
   if (!response.ok) {
