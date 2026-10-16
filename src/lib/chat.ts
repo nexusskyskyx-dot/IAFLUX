@@ -30,8 +30,8 @@ export async function requestChat(input: {
   key: string;
   searchKey: string;
   searchMode: SearchMode;
-  /** Canvas manifest: names and line counts, so the model patches what exists. */
-  canvas?: { name: string; lines: number }[];
+  /** Canvas state: names, line counts, and contents of whatever fits. */
+  canvas?: { name: string; lines: number; content?: string; omitted?: boolean }[];
   /** The unfinished tagged block from the previous attempt, replayed server-side. */
   resume?: string;
   accessCode: string;

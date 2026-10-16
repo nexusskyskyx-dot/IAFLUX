@@ -25,7 +25,13 @@
 
 const AIFLUX_TAGS = ['aiflux-write', 'aiflux-patch', 'aiflux-delete'];
 const VARIANT_TAGS = ['document', 'file', 'artifact'];
-const TAG_NAMES = [...AIFLUX_TAGS, ...VARIANT_TAGS];
+/**
+ * Pseudo tool calls agentic models invent when they want data they were not
+ * given — `<url_fetch>`, `<read_file>`, `<tool_call>` and friends. AIFLUX has no
+ * such capability, so the invocation is dropped rather than shown to the user.
+ */
+const IGNORED_TAGS = ['url_fetch', 'fetch_url', 'urlfetch', 'read_file', 'file_read', 'get_file', 'tool_call', 'tool_use', 'function_call', 'browse', 'web_fetch'];
+const TAG_NAMES = [...AIFLUX_TAGS, ...VARIANT_TAGS, ...IGNORED_TAGS];
 const OPEN_TAG = new RegExp(`<(${TAG_NAMES.join('|')})\\b([^>]*)>`, 'i');
 /** A nested operation inside a block means the model re-opened a tag it was in. */
 const NESTED_OP = /<aiflux-(write|patch|delete)\b/i;
@@ -33,25 +39,32 @@ const NESTED_OP = /<aiflux-(write|patch|delete)\b/i;
 /** Guard against a model that opens a block and never closes it. */
 const MAX_BLOCK_CHARS = 400_000;
 
-/**
- * An unfinished tag at the very end of a chunk: an opening bracket, an
- * optional slash, a name, and then anything except the `>` that would end it.
- * Requiring at least one name character keeps ordinary prose like `a < b`
- * flowing instead of buffering the rest of the message.
- */
-const TAG_FRAGMENT = /^<\/?[a-z][a-z0-9-]*(\s[^>]*)?$/i;
 const MAX_HOLD = 1_024;
+/** Tag names may contain letters, digits, underscores, dots and dashes. */
+const TAG_NAME = /^[a-z_][\w.-]*$/i;
 
-/** Chars to hold back so a tag split across chunks is not emitted as content. */
+/**
+ * Chars to hold back so a tag split across chunks is not emitted as content.
+ *
+ * The tricky part is a trailing `<`: it may be the start of a tag that is
+ * still arriving, or ordinary prose like `a < b`. Hold only what really could
+ * still become one of our tags — a bare bracket, a name still being typed, or
+ * a recognised name awaiting its `>`. Everything else flows straight through.
+ */
 function tagFragmentHold(text) {
   const at = text.lastIndexOf('<');
   if (at < 0) return 0;
   const tail = text.slice(at);
-  if (tail.length > MAX_HOLD) return 0;
-  // A bracket that arrived on its own must wait for its name, but a bare `<`
-  // followed by text is prose and must not stall the rest of the message.
-  if (tail === '<' || tail === '</') return tail.length;
-  return TAG_FRAGMENT.test(tail) ? tail.length : 0;
+  if (tail.length > MAX_HOLD || tail.includes('>')) return 0;
+  const body = tail.replace(/^<\/?/, '');
+  if (!body) return tail.length; // a bracket that arrived on its own
+  if (/^\s/.test(body)) return 0; // `< b` is a comparison, not a tag
+  const name = body.split(/[\s"'=]/)[0];
+  if (!name) return tail.length;
+  // Still typing the name: it could grow into anything.
+  if (name === body) return TAG_NAME.test(name) ? tail.length : 0;
+  // Past the name: only wait if it is one we actually handle.
+  return TAG_NAMES.some((known) => known.startsWith(name.toLowerCase())) ? tail.length : 0;
 }
 
 function attribute(attrs, name) {
@@ -122,6 +135,9 @@ export function createFileOpParser({ onText, onOp, maxBlock = MAX_BLOCK_CHARS } 
       onOp({ action: 'delete', path: pathOf(attrs), status: 'done', raw });
       return;
     }
+    // A pseudo tool call is discarded whole: showing the user a fabricated
+    // endpoint they cannot call is worse than showing nothing.
+    if (IGNORED_TAGS.includes(tag)) { block = { tag, action: 'ignore', path: '', raw, body: '' }; return; }
     const path = pathOf(attrs);
     // A variant wrapper only becomes a file when the model named the target.
     // Otherwise it is transparent: the body flows through as ordinary prose.
@@ -133,6 +149,7 @@ export function createFileOpParser({ onText, onOp, maxBlock = MAX_BLOCK_CHARS } 
     const { tag, action, path, raw, body } = block;
     const full = raw + body + closeRaw;
     block = null;
+    if (action === 'ignore') return;
     if (action === 'transparent') {
       // A wrapper the model chose for itself. The tags are dropped and the body
       // is re-emitted as a *named* fenced block, so the client's fenced-block
@@ -203,10 +220,15 @@ export function createFileOpParser({ onText, onOp, maxBlock = MAX_BLOCK_CHARS } 
       drain(true);
       if (block) {
         // A transparent wrapper is only decorative, so its text is prose.
+        // An ignored pseudo call is dropped along with its tag, closed or not.
+        // A transparent wrapper is only decorative, so its text is prose.
+        // An ignored pseudo call is dropped along with its tag, closed or not.
         if (block.action === 'transparent') emit(block.body);
         // An AIFLUX block is incomplete: never applied to a file, but the raw
         // text is returned so the client can resume exactly where it stopped.
-        else onOp({ action: block.action, path: block.path, status: 'incomplete', raw: block.raw + block.body });
+        else if (block.action !== 'ignore') {
+          onOp({ action: block.action, path: block.path, status: 'incomplete', raw: block.raw + block.body });
+        }
         block = null;
       }
       if (buffer) { emit(buffer); buffer = ''; }

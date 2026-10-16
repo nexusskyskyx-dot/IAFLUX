@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDownToLine, Check, ChevronRight, Code2, KeyRound, Menu, PanelRightOpen } from 'lucide-react';
 import type { AppConfig, AttachedFile, ChatMessage, Conversation, Credentials, ModelInfo, Provider, SearchMode, WorkspaceFile } from './types';
 import { CURATED_MODELS, DEFAULT_MODEL } from './lib/models';
-import { createDraft, downloadConversation, extractCodeFiles, mergeGeneratedFiles, stripNamedCodeBlocks, toProviderMessages } from './lib/files';
+import { canvasContext, createDraft, downloadConversation, extractCodeFiles, mergeGeneratedFiles, stripNamedCodeBlocks, toProviderMessages } from './lib/files';
 import { hasSavedModel, loadActiveId, loadConversations, loadCredentials, loadModel, loadSearchMode, saveActiveId, saveConversations, saveCredentials, saveModel, saveSearchMode } from './lib/storage';
 import { newId } from './lib/id.ts';
 import { isUsableFreeCatalogModel } from './lib/model-policy.mjs';
@@ -227,10 +227,10 @@ export default function App() {
       ...activeChat, title: activeChat.messages.length === 0 ? text.replace(/\s+/g, ' ').slice(0, 53) + (text.length > 53 ? '…' : '') : activeChat.title,
       updatedAt: now, messages: [...activeChat.messages, userMessage, assistantMessage],
     };
-    // Tell the model what is already on the Canvas so it patches a file rather
-    // than rewriting it blind. Names and sizes only — contents stay private
-    // until the user attaches a file to the message.
-    const canvasManifest = updated.files.map((file) => ({ name: file.name, lines: file.content.split('\n').length }));
+    // Tell the model what is already on the Canvas — and show it the contents
+    // of whatever fits, so it can patch accurately instead of rewriting blind
+    // or inventing a way to fetch the file.
+    const canvasManifest = canvasContext(updated.files);
     if (activeId) setChats((previous) => previous.map((chat) => chat.id === chatId ? updated : chat));
     else { setChats((previous) => [updated, ...previous]); setActiveId(chatId); }
     setSending(true);

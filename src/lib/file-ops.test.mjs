@@ -156,3 +156,29 @@ test('a fallback file that replaces an existing one reports the real change', ()
   const results = opResultsForFiles(existing, generated);
   assert.deepEqual({ added: results[0].added, removed: results[0].removed }, { added: 2, removed: 1 });
 });
+
+test('canvas context includes contents while they fit the budget', async () => {
+  const { canvasContext } = await import('./files.ts');
+  const entries = canvasContext([
+    { id: 'a', name: 'index.html', content: '<h1>Hi</h1>', origin: 'generated' },
+    { id: 'b', name: 'app.js', content: 'const a = 1;', origin: 'generated' },
+  ]);
+  assert.deepEqual(entries.map((entry) => entry.name), ['index.html', 'app.js']);
+  assert.equal(entries[0].content, '<h1>Hi</h1>');
+  assert.equal(entries[0].lines, 1);
+  assert.equal(entries[1].content, 'const a = 1;');
+  assert.ok(!entries.some((entry) => entry.omitted));
+});
+
+test('one oversized file is withheld without hiding the small ones after it', async () => {
+  const { canvasContext } = await import('./files.ts');
+  const huge = 'x'.repeat(500);
+  const entries = canvasContext([
+    { id: 'a', name: 'huge.js', content: huge, origin: 'generated' },
+    { id: 'b', name: 'tiny.js', content: 'const a = 1;', origin: 'generated' },
+  ], 100);
+  assert.equal(entries[0].omitted, true, 'too big for the budget');
+  assert.equal(entries[0].content, undefined);
+  assert.equal(entries[0].lines, 1);
+  assert.equal(entries[1].content, 'const a = 1;', 'the small file still gets through');
+});

@@ -191,3 +191,30 @@ test('ordinary HTML and comparison operators stay in the prose', () => {
   assert.equal(text, prose);
   assert.deepEqual(ops, []);
 });
+
+// Agentic models invent tool calls to read data they were not given. AIFLUX has
+// no such capability, so the invocation is dropped rather than shown to the user.
+test('an invented tool call is dropped instead of reaching the chat', () => {
+  const tag = '<url_fetch> https://app.aiflux.workers.dev/canvas/getFile?file=index.html </url_fetch>';
+  for (const chunks of [[`Let me check.\n${tag}\nHere you go.`], tag.match(/[\s\S]{1,7}/g) || []]) {
+    const { text, ops } = collect(chunks);
+    assert.deepEqual(ops, [], 'no file operation is produced');
+    assert.doesNotMatch(text, /url_fetch/, 'the fabricated tag is not shown');
+    assert.doesNotMatch(text, /workers\.dev/, 'nor the fabricated endpoint');
+  }
+  assert.equal(collect(['Let me check.\n' + tag + '\nHere you go.']).text, 'Let me check.\n\nHere you go.');
+});
+
+test('other invented tool tags are dropped the same way', () => {
+  for (const tag of ['url_fetch', 'read_file', 'tool_call', 'function_call', 'web_fetch', 'get_file']) {
+    const { text, ops } = collect([`<${tag}>path/to/thing</${tag}>`]);
+    assert.deepEqual(ops, [], tag);
+    assert.equal(text, '', tag);
+  }
+});
+
+test('an invented tool call that is never closed does not swallow the reply', () => {
+  const { text, ops } = collect(['Before. <url_fetch> https://example.com/x']);
+  assert.deepEqual(ops, []);
+  assert.equal(text, 'Before. ', 'the tag is dropped; nothing after it was written');
+});

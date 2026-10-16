@@ -40,17 +40,41 @@ test('the central capability profile covers shipped features and keeps identity 
   assert.match(prompt, /<aiflux-patch path="app\.js">/);
   assert.match(prompt, /<<<<<<< SEARCH/);
   assert.match(prompt, /<aiflux-delete path="old\.html" \/>/);
-  // The model is told what is already there so it patches instead of rewriting.
-  assert.match(prompt, /Files on the Canvas right now:/);
+  // The model is told what is on the canvas so it patches instead of rewriting.
+  assert.match(prompt, /Files on the Canvas right now|Canvas is empty/);
   // Models fall back on wrapper tags from training unless explicitly warned off.
   for (const banned of ['<document>', '<file>', '<artifact>']) assert.match(prompt, new RegExp(`Do not wrap output in .*${banned.replace(/[<>]/g, (c) => `\\${c}`)}`, 's'));
 });
 
-test('the canvas manifest reaches the prompt so the model patches rather than rewrites', () => {
-  const prompt = buildAssistantPrompt({ provider: 'gemini', model: models.gemini, canvasFiles: ['index.html — 42 lines', 'app.js — 7 lines'] });
-  assert.match(prompt, /- index\.html — 42 lines/);
-  assert.match(prompt, /- app\.js — 7 lines/);
-  assert.match(buildAssistantPrompt({ provider: 'groq', model: models.groq }), /\(none yet\)/, 'an empty canvas says so');
+test('the canvas reaches the prompt with real contents, so the model need not fetch anything', () => {
+  const prompt = buildAssistantPrompt({ provider: 'gemini', model: models.gemini, canvasFiles: [
+    { name: 'index.html', lines: 3, content: '<h1>Hi</h1>\n<p>There</p>\n<p>Ok</p>' },
+    { name: 'app.js', lines: 2, content: 'const a = 1;\nconst b = 2;' },
+  ] });
+  assert.match(prompt, /--- index\.html \(3 lines\) ---/);
+  assert.match(prompt, /<h1>Hi<\/h1>/, 'the actual contents are supplied');
+  assert.match(prompt, /const a = 1;/);
+  assert.match(prompt, /CURRENT contents/, 'the model is told these are current');
+
+  const empty = buildAssistantPrompt({ provider: 'groq', model: models.groq });
+  assert.match(empty, /Canvas is empty/, 'an empty canvas says so');
+});
+
+test('a file too large to send is named so the model can ask for it', () => {
+  const prompt = buildAssistantPrompt({ provider: 'gemini', model: models.gemini, canvasFiles: [
+    { name: 'index.html', lines: 2, content: '<h1>Hi</h1>' },
+    { name: 'huge.js', lines: 900, content: '' },
+  ] });
+  assert.match(prompt, /--- index\.html \(2 lines\) ---/);
+  assert.match(prompt, /huge\.js \(900 lines\): too large to include/);
+  assert.match(prompt, /add the file to a message/);
+});
+
+test('the prompt bans the invented tool calls agentic models emit', () => {
+  const prompt = buildAssistantPrompt({ provider: 'gemini', model: models.gemini });
+  assert.match(prompt, /no tools and no network/);
+  for (const invented of ['<url_fetch>', '<read_file>']) assert.match(prompt, new RegExp(invented.replace(/[<>]/g, (c) => `\\${c}`)));
+  assert.match(prompt, /writing one does nothing but confuse the user/);
 });
 
 test('every provider includes the AIFLUX profile as a high-priority instruction on every turn', () => {

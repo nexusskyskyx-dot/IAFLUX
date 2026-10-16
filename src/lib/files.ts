@@ -142,6 +142,33 @@ export function stripNamedCodeBlocks(markdown: string): string {
   return markdown.replace(NAMED_FENCE, '\n');
 }
 
+/**
+ * Chars of canvas file contents sent to the model as context. Bounded on
+ * purpose: every message would otherwise carry the whole workspace.
+ */
+export const CANVAS_CONTEXT_BUDGET = 40_000;
+
+export type CanvasEntry = { name: string; lines: number; content?: string; omitted?: boolean };
+
+/**
+ * What the model is told about the canvas. Small files arrive with their
+ * contents so the model can patch them accurately and has no reason to invent
+ * a way of reading them; anything that would blow the budget is listed by name
+ * only. Files are considered in order, so one huge file cannot crowd out the
+ * small ones behind it.
+ */
+export function canvasContext(files: WorkspaceFile[], budget = CANVAS_CONTEXT_BUDGET): CanvasEntry[] {
+  let used = 0;
+  return files.map((file) => {
+    const lines = file.content.split('\n').length;
+    if (file.content.length <= budget - used) {
+      used += file.content.length;
+      return { name: file.name, lines, content: file.content };
+    }
+    return { name: file.name, lines, omitted: true };
+  });
+}
+
 export function mergeGeneratedFiles(existing: WorkspaceFile[], generated: WorkspaceFile[]): WorkspaceFile[] {
   const files = [...existing];
   for (const file of generated) {

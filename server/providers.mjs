@@ -77,14 +77,19 @@ export function validateChat(body, ollamaConfigured = false) {
   if (totalLength > 180_000 || cleanMessages.at(-1).role !== 'user') {
     throw new RequestError(400, 'Conversation is too long or does not end with a user message. Start a new chat or shorten the context.');
   }
-  // A compact manifest of what is on the Canvas: names and sizes only, never
-  // contents. It tells the model which files it may patch with SEARCH/REPLACE
-  // instead of rewriting from scratch.
+  // What is on the Canvas, with contents for whatever fits. Giving the model the
+  // current text is what makes SEARCH/REPLACE patches reliable — and it removes
+  // the reason agentic models invent a way to fetch the file themselves.
+  let contentBudget = 60_000;
   const canvasFiles = Array.isArray(canvas)
     ? canvas.slice(0, 60).map((entry) => {
         const name = typeof entry?.name === 'string' ? entry.name.replace(/[^\w./-]/g, '').slice(0, 100) : '';
+        if (!name) return null;
         const lines = Number.isFinite(entry?.lines) ? Math.max(0, Math.trunc(entry.lines)) : 0;
-        return name ? `${name} — ${lines} ${lines === 1 ? 'line' : 'lines'}` : null;
+        const raw = typeof entry?.content === 'string' ? entry.content : '';
+        const content = raw.slice(0, Math.max(0, Math.min(raw.length, contentBudget)));
+        contentBudget -= content.length;
+        return { name, lines, content };
       }).filter(Boolean)
     : [];
   // A write the previous attempt ran out of time inside. The server replays it
