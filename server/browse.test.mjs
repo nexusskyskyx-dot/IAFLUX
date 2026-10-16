@@ -384,3 +384,35 @@ test('a stylesheet link is held to the same address rules as the page', async ()
   const missing = '<html><head><link rel="stylesheet" href="https://fonts.invalid/x.css"></head></html>';
   assert.equal(await collectExternalCss(missing, 'https://example.com/', { allowPrivateAddresses: false }), '');
 });
+
+test('every font in a Google Fonts URL is captured, not just one', () => {
+  // A two-face pairing (display + text) is the norm, and a greedy match took
+  // only the last family — losing the display face, which is the useful half.
+  const html = '<html><head><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;700&amp;family=Inter:wght@400;500"></head></html>';
+  const design = extractDesign(html, 'https://example.com/');
+  assert.ok(design.fonts.includes('Space Grotesk'), 'the display face, which is first');
+  assert.ok(design.fonts.includes('Inter'), 'and the text face');
+  // Entities must be decoded before splitting, or the separator is left behind.
+  assert.ok(!design.fonts.some((font) => font.includes('amp;')), 'no entity fragments survive');
+});
+
+test('an outbound link takes the gallery\'s name for that site, not its domain', () => {
+  const refs = extractReferences(
+    `<a href="/websites/100968-fernand">Fernand</a>
+     <a href="https://getfernand.com/?ref=land-book.com">Visit website</a>
+     <a href="/websites/100967-zaro">Zaro</a>
+     <a href="https://zaro.ai/">Visit website</a>`,
+    'https://land-book.com/',
+  );
+  const byUrl = Object.fromEntries(refs.map((r) => [r.url, r.name]));
+  assert.equal(byUrl['https://getfernand.com/'], 'Fernand', 'getfernand.com is named from the gallery entry');
+  assert.equal(byUrl['https://zaro.ai/'], 'Zaro');
+});
+
+test('a gallery name is not guessed from a short or unrelated domain', () => {
+  const refs = extractReferences(
+    '<a href="https://x.io/">Visit website</a>',
+    'https://land-book.com/',
+  );
+  assert.equal(refs[0].name, 'X', 'too short to match anything, so the domain stands');
+});

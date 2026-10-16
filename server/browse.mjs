@@ -297,7 +297,7 @@ function topByFrequency(values, limit) {
 }
 
 const COLOR_PATTERN = /#(?:[0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{3}|[0-9a-f]{4})\b|(?:\b(?:rgb|rgba|hsl|hsla|oklch|oklab|lab|lch|color-mix)\([^)]*\))/gi;
-const FONT_SOURCE_PATTERN = /fonts\.googleapis\.com\/css2?\?[^"']*family=([^&"']+)/gi;
+const FONT_SOURCE_PATTERN = /fonts\.googleapis\.com\/css2?\?([^"'\s>]+)/gi;
 const FONT_STACK_PATTERN = /(?:^|[{;,\s])font(?:-family)?\s*:\s*([^;{}]+)/gi;
 const TOKEN_PATTERN = /--([a-z0-9][a-z0-9-_]*)\s*:\s*([^;{}]+)/gi;
 // Keep a custom property whose value is short and free of markup. Colours
@@ -334,9 +334,17 @@ export function extractDesign(html, finalUrl = '', externalCss = '') {
 
   const fonts = [];
   for (const match of html.matchAll(FONT_SOURCE_PATTERN)) {
-    for (const family of decodeEntities(match[1]).split('&')) {
-      const name = family.split(':')[0].replace(/\+/g, ' ').trim();
-      if (name) fonts.push(name);
+    // Decode before splitting: in HTML the separators are usually &amp;, and
+    // splitting first would leave "amp;family=..." behind. Then take every
+    // family= parameter, not just the first or last — a two-face pairing is
+    // the norm, and dropping the display face is the expensive mistake.
+    for (const pair of decodeEntities(match[1]).split('&')) {
+      const split = pair.indexOf('=');
+      if (split < 0 || pair.slice(0, split).trim().toLowerCase() !== 'family') continue;
+      for (const family of pair.slice(split + 1).split(/[|,]/)) {
+        const name = family.split(':')[0].replace(/\+/g, ' ').trim();
+        if (name) fonts.push(name);
+      }
     }
   }
   for (const match of css.matchAll(FONT_STACK_PATTERN)) {
@@ -514,6 +522,22 @@ export function extractReferences(html, finalUrl) {
     seen.add(key);
     references.push({ name: referenceName(label, target.toString()), url: target.toString(), external: isOutbound });
     if (references.length >= 40) break;
+  }
+
+  // An outbound link is nearly always labelled "Visit website", so its name
+  // falls back to the domain and getfernand.com becomes "Getfernand". The
+  // gallery's own entry for that same site has the real name, so pair them.
+  const entries = references.filter((reference) => !reference.external);
+  for (const reference of references) {
+    if (!reference.external) continue;
+    let host = '';
+    try { host = new URL(reference.url).hostname.replace(/^www\./, '').split('.')[0].toLowerCase(); } catch { continue; }
+    if (host.length < 4) continue;
+    const named = entries.find((entry) => {
+      const key = entry.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+      return key.length >= 4 && (host.includes(key) || key.includes(host));
+    });
+    if (named) reference.name = named.name;
   }
   return references;
 }
