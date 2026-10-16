@@ -30,7 +30,7 @@ interface Props {
 }
 
 const suggestions = [
-  { icon: <WandSparkles size={20} strokeWidth={1.7} />, color: 'lime', title: 'Build a website', desc: 'From idea to first version', prompt: 'Build a beautiful, responsive landing page for a creative studio. Give me one complete HTML file with CSS and a subtle interactive detail.' },
+  { icon: <WandSparkles size={20} strokeWidth={1.7} />, color: 'brand', title: 'Build a website', desc: 'From idea to first version', prompt: 'Build a beautiful, responsive landing page for a creative studio. Give me one complete HTML file with CSS and a subtle interactive detail.' },
   { icon: <Braces size={20} strokeWidth={1.7} />, color: 'blue', title: 'Debug my code', desc: 'Find the issue, fix the flow', prompt: 'Help me debug this code. Explain the root cause clearly, then show the corrected version:\n\n' },
   { icon: <Lightbulb size={20} strokeWidth={1.7} />, color: 'purple', title: 'Explore an idea', desc: 'Make the what-if real', prompt: 'I have an app idea. Help me refine it, choose a simple tech stack, and map out a first version I can build.' },
   { icon: <Code2 size={20} strokeWidth={1.7} />, color: 'orange', title: 'Learn something new', desc: 'Understand it by building it', prompt: 'Explain React hooks using a small, practical example I can edit and run. Walk me through how it works.' },

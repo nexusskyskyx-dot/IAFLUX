@@ -1,10 +1,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createServer } from 'vite';
 
 const model = { id: 'gemini-2.5-flash', provider: 'gemini', name: 'Gemini 2.5 Flash', shortName: 'Gemini Flash', description: '', strength: '', badge: '' };
+
+test('AIFLUX branding defines black as primary and the uploaded mark’s purple as secondary', async () => {
+  const styles = await readFile(new URL('../styles.css', import.meta.url), 'utf8');
+  const brand = await readFile(new URL('../../public/brand-mark.svg', import.meta.url), 'utf8');
+  const component = await readFile(new URL('../components/Brand.tsx', import.meta.url), 'utf8');
+  assert.match(styles, /--primary:\s*#070708/);
+  assert.match(styles, /--secondary:\s*#6d35f4/);
+  assert.match(brand, /fill="#070708"/);
+  assert.match(brand, /fill="#fff"/);
+  assert.match(brand, /fill="#6d35f4"/);
+  assert.match(component, /src="\/brand-mark\.svg"/);
+});
 
 test('chat displays the search mode, trusted source links, and honest skipped-search status', async () => {
   const vite = await createServer({ configFile: false, appType: 'custom', optimizeDeps: { noDiscovery: true, include: [] }, server: { middlewareMode: true } });
