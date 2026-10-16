@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDownToLine, ArrowUpRight, Check, Code2, Copy, Eye, FileCode2, FileDiff, FilePlus2, Files, FolderOpen, Github, MoreHorizontal, Play, Plus, RefreshCw, Trash2, X } from 'lucide-react';
+import { ArrowDownToLine, ArrowUpRight, Check, Code2, Copy, Eye, FileCode2, FileDiff, FilePlus2, Files, FolderOpen, Github, Globe2, MoreHorizontal, Play, Plus, RefreshCw, Trash2, X } from 'lucide-react';
 import type { Conversation, WorkspaceFile } from '../types';
 import { buildPreview, downloadFile, downloadProject, fileColor, fileLanguage, safeFilename } from '../lib/files';
 import CanvasDiff from './CanvasDiff';
@@ -28,13 +28,14 @@ export default function Canvas(props: Props) {
   const [newName, setNewName] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   const [refresh, setRefresh] = useState(0);
+  const [remoteImagesAllowed, setRemoteImagesAllowed] = useState(false);
   const [copied, setCopied] = useState(false);
   const importRef = useRef<HTMLInputElement>(null);
   const file = props.conversation.files.find((item) => item.id === props.conversation.selectedFileId) || props.conversation.files[0];
-  const preview = useMemo(() => buildPreview(props.conversation.files), [props.conversation.files]);
+  const preview = useMemo(() => buildPreview(props.conversation.files, { allowRemoteImages: remoteImagesAllowed }), [props.conversation.files, remoteImagesAllowed]);
   const lineCount = file?.content.split('\n').length || 0;
 
-  useEffect(() => { setMode('edit'); }, [props.conversation.id]);
+  useEffect(() => { setMode('edit'); setRemoteImagesAllowed(false); }, [props.conversation.id]);
   useEffect(() => {
     if (file?.lastChangedBy === 'ai' && file.previousContent !== undefined) setMode('diff');
   }, [file?.id, file?.content, file?.lastChangedBy]);
@@ -138,7 +139,10 @@ export default function Canvas(props: Props) {
         <span className="canvas-bottom-right">AUTOSAVED LOCALLY</span>
       </div>
       {file && mode !== 'test' && <button className="canvas-context-button" title={`Attach ${file.name} to chat so AIFLUX can edit it`} onClick={() => props.onAddContext(file)}><span><FileCode2 size={15} /> Edit {file.name.split('/').at(-1)} with AI</span><ArrowUpRight size={16} /></button>}
-      {mode === 'test' && <div className="preview-security-note">Sandbox only: no network access, shell, or unit-test runner.</div>}
+      {mode === 'test' && <div className="preview-test-controls">
+        <button type="button" className={remoteImagesAllowed ? 'remote-images-enabled' : ''} aria-pressed={remoteImagesAllowed} onClick={() => { setRemoteImagesAllowed((allowed) => !allowed); setRefresh((value) => value + 1); }} title="Allow only HTTPS image requests; the image host may see your IP address."><Globe2 size={13} /> Remote images {remoteImagesAllowed ? 'ON' : 'OFF'}</button>
+        <span>{remoteImagesAllowed ? 'HTTPS images are enabled; hosts may see your IP. External scripts, fetch, and forms remain blocked.' : 'Off by default. Enable to load HTTPS images; inline/data images work without it.'}</span>
+      </div>}
     </div>
   </aside>;
 }

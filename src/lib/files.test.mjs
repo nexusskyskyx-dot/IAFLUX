@@ -49,9 +49,19 @@ test('sandbox preview wraps HTML fragments and includes CSS/JS with a restrictiv
   assert.match(preview, /Content-Security-Policy/);
   assert.ok(preview.indexOf('Content-Security-Policy') < preview.indexOf('<h1>Hello'));
   assert.match(preview, /connect-src 'none'/);
+  assert.match(preview, /img-src data: blob:/);
+  assert.doesNotMatch(preview, /img-src data: blob: https:/);
   assert.match(preview, /<style>h1 \{ color: red; \}<\/style>/);
   assert.match(preview, /<script>document.querySelector/);
   assert.equal(buildPreview([file('app.py', 'print(1)')]), null);
+});
+
+test('remote-image opt-in permits HTTPS image sources only while other network access stays blocked', () => {
+  const preview = buildPreview([file('index.html', '<img src="https://images.example/photo.jpg" alt="A photo">')], { allowRemoteImages: true });
+  assert.match(preview, /img-src data: blob: https:/);
+  assert.match(preview, /connect-src 'none'/);
+  assert.match(preview, /form-action 'none'/);
+  assert.doesNotMatch(preview, /script-src https:/);
 });
 
 test('conversation history includes attachments but skips failed assistant messages', () => {

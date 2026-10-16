@@ -35,6 +35,8 @@ test('the central capability profile covers shipped features and keeps identity 
   assert.match(prompt, /Canvas files can be viewed, edited, safely tested as HTML\/SVG/);
   assert.match(prompt, /explicitly attaches a Canvas file and asks for an edit/);
   assert.match(prompt, /preserves the previous contents for review/);
+  assert.match(prompt, /HTTPS images are blocked in previews by default/);
+  assert.match(prompt, /Avoid remote image URLs unless the user asks/);
   assert.match(prompt, /HTML or SVG projects in a sandbox/);
   assert.match(prompt, /attach local text\/code files/);
   assert.match(prompt, /GitHub repository file, issue, or pull request/);

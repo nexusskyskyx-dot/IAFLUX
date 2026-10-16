@@ -138,16 +138,19 @@ export function mergeGeneratedFiles(existing: WorkspaceFile[], generated: Worksp
   return files;
 }
 
-const CSP = `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'`;
+function previewCsp(allowRemoteImages: boolean): string {
+  const imageSources = allowRemoteImages ? 'data: blob: https:' : 'data: blob:';
+  return `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src ${imageSources}; font-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'`;
+}
 
-export function buildPreview(files: WorkspaceFile[]): string | null {
+export function buildPreview(files: WorkspaceFile[], { allowRemoteImages = false }: { allowRemoteImages?: boolean } = {}): string | null {
   const html = files.find((file) => file.name.toLowerCase().endsWith('.html'));
   const svg = html ? undefined : files.find((file) => file.name.toLowerCase().endsWith('.svg'));
   if (!html && !svg) return null;
   let document = html?.content || svg?.content || '';
   // Wrap HTML fragments as a real document so the restrictive CSP is always applied.
   if (!/<html\b/i.test(document)) document = `<!doctype html><html><head></head><body>${document}</body></html>`;
-  const meta = `<meta http-equiv="Content-Security-Policy" content="${CSP}">`;
+  const meta = `<meta http-equiv="Content-Security-Policy" content="${previewCsp(allowRemoteImages)}">`;
   if (/<head\b[^>]*>/i.test(document)) document = document.replace(/<head\b[^>]*>/i, (opening) => `${opening}${meta}`);
   else document = document.replace(/<html\b[^>]*>/i, (opening) => `${opening}<head>${meta}</head>`);
   const css = files.filter((file) => /\.css$/i.test(file.name)).map((file) => file.content.replace(/<\/style/gi, '<\\/style')).join('\n');
