@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import {
   browse, ipIsBlocked, parseRobots, robotsAllows, extractDesign, toReadableText,
-  extractReferences, describeBrowse, collectExternalCss, BROWSE_USER_AGENT,
+  extractReferences, describeBrowse, collectExternalCss, proxyUrl, BROWSE_USER_AGENT,
 } from './browse.mjs';
 
 // ---------------------------------------------------------------------------
@@ -460,4 +460,22 @@ test('requests carry the headers a document request carries', async () => {
     assert.equal(result.design.title, 'has-lang', 'accept-language is sent');
     assert.match(result.text, /document/, 'and sec-fetch-dest says document, not subresource');
   });
+});
+
+test('fetches can be routed through a relay the operator configures', () => {
+  // A host that answers a serverless address with 403 regardless of how the
+  // request identifies itself leaves nothing for us to change. The fix belongs
+  // to whoever runs the deployment, so it is theirs to set.
+  const saved = process.env.AIFLUX_FETCH_PROXY;
+  try {
+    delete process.env.AIFLUX_FETCH_PROXY;
+    assert.equal(proxyUrl('https://example.com/a'), 'https://example.com/a', 'unchanged by default');
+    process.env.AIFLUX_FETCH_PROXY = 'https://relay.example/?url=';
+    assert.equal(proxyUrl('https://example.com/a'), 'https://relay.example/?url=https://example.com/a', 'appended when there is no placeholder');
+    process.env.AIFLUX_FETCH_PROXY = 'https://relay.example/?target={url}';
+    assert.match(proxyUrl('https://example.com/a'), /^https:\/\/relay\.example\/\?target=https%3A%2F%2Fexample\.com%2Fa$/, 'encoded where {url} is named');
+  } finally {
+    if (saved === undefined) delete process.env.AIFLUX_FETCH_PROXY;
+    else process.env.AIFLUX_FETCH_PROXY = saved;
+  }
 });

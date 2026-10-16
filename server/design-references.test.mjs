@@ -1,7 +1,8 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  primeDesignReferences, galleryUrlFor, primingEnabled, clearReferenceCache, PRIME_BUDGET_MS,
+  primeDesignReferences, galleryUrlFor, godlyUrlFor, galleryCandidatesFor,
+  primingEnabled, clearReferenceCache, PRIME_BUDGET_MS,
 } from './design-references.mjs';
 
 // Every test drives priming through a fake fetcher, so nothing here touches the
@@ -114,8 +115,8 @@ test('a gallery that cannot be read degrades to no note but still reports the at
   });
   assert.notEqual(primed, null, 'the attempt is returned');
   assert.equal(primed.note, '', 'no references means no note, and the model falls back on the playbook');
-  assert.equal(primed.results.length, 2, 'the matching gallery, then a different one tried after it');
-  assert.deepEqual(primed.results.map((r) => r.ok), [false, false]);
+  assert.equal(primed.results.length, 3, 'the matching gallery, then the others tried after it');
+  assert.deepEqual(primed.results.map((r) => r.ok), [false, false, false]);
   assert.match(primed.results[0].error, /offline/, 'with the reason, so the user can see what happened');
 });
 
@@ -132,7 +133,7 @@ test('a failed attempt is not cached, so it can succeed on the next message', as
   const browseImpl = async () => { calls += 1; return { ok: false, error: 'offline' }; };
   await primeDesignReferences('landing page', { browseImpl });
   await primeDesignReferences('landing page', { browseImpl });
-  assert.equal(calls, 4, 'two galleries per attempt, twice over — it tries again rather than remembering the failure');
+  assert.equal(calls, 6, 'three galleries per attempt, twice over — it tries again rather than remembering the failure');
 });
 
 test('a gallery that loads but has no featured site still counts', async () => {
@@ -236,7 +237,28 @@ test('a gallery that cannot be read does not cost the request its references', a
       : { ok: false, url, error: 'godly.design could not be reached.' }),
   });
   assert.ok(entry.note.includes('https://godly.design/'), 'the other gallery was tried');
-  assert.equal(entry.results.length, 3, 'and both attempts are reported, so the failure is visible');
-  assert.equal(entry.results[0].ok, false);
-  assert.equal(entry.results[1].ok, true);
+  assert.equal(entry.results.length, 4, 'and every attempt is reported, so the failures stay visible');
+  assert.deepEqual(entry.results.slice(0, 3).map((r) => r.ok), [false, false, true], 'the third gallery answered');
+});
+
+test('Godly is a gallery in its own right, routed by what was asked for', () => {
+  // Its robots.txt is a plain `Allow: /`, and it publishes a section library —
+  // hero, CTA, footer — which is closer to what a page is made of than a
+  // whole-site gallery is.
+  assert.equal(godlyUrlFor('make me a landing page for Docox'), 'https://godly.design/websites');
+  assert.equal(godlyUrlFor('design a strong hero section'), 'https://godly.design/hero');
+  assert.equal(godlyUrlFor('I need a call to action'), 'https://godly.design/cta');
+  assert.equal(godlyUrlFor('a footer for the site'), 'https://godly.design/footer');
+  assert.equal(godlyUrlFor('a logo for my brand'), 'https://godly.design/logos');
+  assert.equal(godlyUrlFor('an og image for sharing'), 'https://godly.design/og-images');
+  assert.equal(godlyUrlFor('something unrelated'), 'https://godly.design/websites');
+});
+
+test('the galleries are tried in order, without repeating one', () => {
+  const candidates = galleryCandidatesFor('make me a landing page');
+  assert.equal(candidates[0], 'https://land-book.com/design/landing-page', 'Land-book first: its categories are the nearest thing its robots.txt allows to a search');
+  assert.ok(candidates.some((url) => url.startsWith('https://godly.design/')), 'then Godly');
+  assert.equal(new Set(candidates).size, candidates.length, 'and none twice');
+  // A request Godly answers with a section page should not lose that answer.
+  assert.ok(galleryCandidatesFor('a hero section').includes('https://godly.design/hero'));
 });

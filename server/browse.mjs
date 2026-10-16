@@ -48,6 +48,24 @@ export const BROWSE_USER_AGENT = process.env.AIFLUX_FETCH_USER_AGENT
  * site of our own initiating it. sec-fetch-mode is deliberately absent: the
  * runtime sets it, and "cors" is the honest answer for a server-side fetch.
  */
+/**
+ * An optional relay for deployments whose outbound requests are refused.
+ *
+ * Some hosts answer a serverless function's address with 403 no matter how the
+ * request identifies itself — the block is on the network, not on our manners,
+ * and there is nothing left for us to change. The one fix available belongs to
+ * whoever runs the deployment, so fetches can be routed through a relay they
+ * trust. `AIFLUX_FETCH_PROXY` may contain `{url}`, which is replaced with the
+ * encoded target; otherwise the target is appended to it. Targets are still
+ * validated before they reach this, so a relay cannot be used to reach inward.
+ */
+export function proxyUrl(target) {
+  const url = String(target || '');
+  const relay = process.env.AIFLUX_FETCH_PROXY;
+  if (!relay) return url;
+  return relay.includes('{url}') ? relay.replace('{url}', encodeURIComponent(url)) : relay + url;
+}
+
 export function browseHeaders(accept = 'text/html,application/xhtml+xml,text/plain;q=0.8,*/*;q=0.5') {
   return {
     'user-agent': BROWSE_USER_AGENT,
@@ -281,7 +299,7 @@ async function fetchRobots(origin, { fetchImpl, timeoutMs = 5_000 } = {}) {
   if (cached && Date.now() - cached.at < ROBOTS_TTL_MS) return cached;
   const entry = { at: Date.now(), groups: [], state: 'allowed' };
   try {
-    const response = await (fetchImpl || fetch)(`${origin}/robots.txt`, {
+    const response = await (fetchImpl || fetch)(proxyUrl(`${origin}/robots.txt`), {
       redirect: 'manual',
       signal: AbortSignal.timeout(timeoutMs),
       headers: browseHeaders('text/plain,*/*'),
@@ -459,7 +477,7 @@ export async function collectExternalCss(html, baseUrl, options = {}) {
     if (timeoutMs < 1_000) break;
     try {
       const target = await assertPublicUrl(cssUrl, { resolver, allowPrivateAddresses });
-      const response = await fetchImpl(target.toString(), {
+      const response = await fetchImpl(proxyUrl(target.toString()), {
         redirect: 'manual',
         signal: AbortSignal.timeout(Math.min(4_000, timeoutMs)),
         headers: browseHeaders('text/css,*/*'),
@@ -653,7 +671,7 @@ export async function browse(rawUrl, options = {}) {
 
     let response;
     try {
-      response = await fetchImpl(url.toString(), {
+      response = await fetchImpl(proxyUrl(url.toString()), {
         redirect: 'manual',
         signal: AbortSignal.timeout(Math.max(1_000, deadline - Date.now())),
         headers: browseHeaders(),
