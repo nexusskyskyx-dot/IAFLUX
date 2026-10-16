@@ -203,6 +203,29 @@ test('a real page yields readable text plus its design signals', async () => {
   });
 });
 
+test('design tokens are read in the forms sites actually use', () => {
+  const html = `<html><head><style>:root{
+    --brand: #ff5a1f;
+    --ink: #111318;
+    --accent: oklch(0.7 0.2 300);
+    --surface: rgb(11, 11, 15);
+    --radius: 14px;
+    --step: clamp(2rem, 6vw, 5rem);
+    --font-display: "Space Grotesk", sans-serif;
+    --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+    --shadow: 0 20px 60px rgba(0,0,0,.4), 0 0 0 1px #fff1;
+  }</style></head><body>hi</body></html>`;
+  const design = extractDesign(html, 'https://example.com/');
+  assert.equal(design.tokens['--brand'], '#ff5a1f', 'hex, the most common form');
+  assert.equal(design.tokens['--ink'], '#111318');
+  assert.equal(design.tokens['--accent'], 'oklch(0.7 0.2 300)');
+  assert.equal(design.tokens['--surface'], 'rgb(11, 11, 15)');
+  assert.equal(design.tokens['--radius'], '14px');
+  assert.equal(design.tokens['--step'], 'clamp(2rem, 6vw, 5rem)');
+  assert.equal(design.tokens['--font-display'], '"Space Grotesk", sans-serif');
+  assert.equal(design.tokens['--ease'], 'cubic-bezier(0.2, 0.8, 0.2, 1)');
+});
+
 test('the extraction is the same whether the page arrives whole or in pieces', async () => {
   await withServer((req, res) => {
     if (req.url === '/robots.txt') return PERMISSIVE(req, res);
@@ -269,6 +292,17 @@ test('a design gallery yields the sites it is featuring', () => {
   assert.ok(urls.some((url) => url.startsWith('https://zaro.ai/')), 'the outbound site is listed');
   assert.equal(urls.some((url) => url.includes('/design/landing')), false, 'internal navigation is not a reference');
   assert.equal(urls.some((url) => url.includes('/login')), false);
+});
+
+test('a generic outbound label is replaced by the site it points at', () => {
+  const refs = extractReferences(
+    '<a href="https://zaro.ai/?ref=land-book.com">Visit</a><a href="https://getfernand.com/">View site</a><a href="https://reevo.ai/">Reevo</a>',
+    'https://land-book.com/',
+  );
+  const byUrl = Object.fromEntries(refs.map((r) => [r.url, r.name]));
+  assert.equal(byUrl['https://zaro.ai/'], 'Zaro', '"Visit" says nothing, so the domain is used');
+  assert.equal(byUrl['https://getfernand.com/'], 'Getfernand');
+  assert.equal(byUrl['https://reevo.ai/'], 'Reevo', 'a real name is kept as it is');
 });
 
 test('a page that is not a gallery yields no references', () => {

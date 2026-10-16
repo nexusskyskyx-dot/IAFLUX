@@ -297,6 +297,11 @@ const COLOR_PATTERN = /#(?:[0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{3}|[0-9a-f]{4})\b|(?
 const FONT_SOURCE_PATTERN = /fonts\.googleapis\.com\/css2?\?[^"']*family=([^&"']+)/gi;
 const FONT_STACK_PATTERN = /(?:^|[{;,\s])font(?:-family)?\s*:\s*([^;{}]+)/gi;
 const TOKEN_PATTERN = /--([a-z0-9][a-z0-9-_]*)\s*:\s*([^;{}]+)/gi;
+// Keep a custom property whose value is short and free of markup. Colours
+// (hex especially — it is how most design systems store a palette), lengths,
+// CSS functions, font stacks and shadows are all worth reporting; anything
+// carrying selector syntax is debris from the stylesheet, not a token.
+const TOKEN_JUNK = /[<>{};@\\]|\n/;
 const FRAMEWORK_SIGNATURES = [
   ['webflow', /webflow|\bwf-[a-z]/i],
   ['framer', /framerusercontent\.com|__framer|data-framer/i],
@@ -339,8 +344,7 @@ export function extractDesign(html, finalUrl = '') {
   for (const match of css.matchAll(TOKEN_PATTERN)) {
     const name = `--${match[1].toLowerCase()}`;
     const value = decodeEntities(match[2]).trim();
-    if (value.length > 60) continue;
-    if (!/(^|[^\w-])(#|rgb|hsl|oklch|oklab|lab|lch|color-mix|var)\(|^-?[\d.]+(px|rem|em|%|vh|vw|deg|s|ms|fr)?$/i.test(value)) continue;
+    if (value.length > 80 || !value || TOKEN_JUNK.test(value)) continue;
     if (tokens[name] === undefined) tokens[name] = value;
   }
 
@@ -393,6 +397,22 @@ export function toReadableText(html, budget = BROWSE_TEXT_BUDGET) {
 
 const GALLERY_HOSTS = new Set(['land-book.com', 'www.land-book.com', 'godly.design', 'www.godly.design', 'www.awwwards.com', 'awwwards.com']);
 
+// Galleries label the outbound link "Visit", which tells the model nothing
+// about which site it is looking at. Fall back to the domain name instead.
+const GENERIC_LINK_LABELS = /^(visit|view|view site|view website|see|live|open|go|launch|demo|website|site|link|read more|learn more)$/i;
+
+function referenceName(label, url) {
+  const cleaned = String(label || '').trim();
+  if (cleaned && !GENERIC_LINK_LABELS.test(cleaned)) return cleaned;
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, '');
+    const first = host.split('.')[0] || host;
+    return first.charAt(0).toUpperCase() + first.slice(1);
+  } catch {
+    return cleaned || url;
+  }
+}
+
 /**
  * On a design gallery the valuable content is not the gallery's own copy, it
  * is the list of sites it is showing. Lift those so the model can name real
@@ -431,7 +451,7 @@ export function extractReferences(html, finalUrl) {
     const key = `${targetHost}${target.pathname}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    references.push({ name: label, url: target.toString(), external: isOutbound });
+    references.push({ name: referenceName(label, target.toString()), url: target.toString(), external: isOutbound });
     if (references.length >= 40) break;
   }
   return references;

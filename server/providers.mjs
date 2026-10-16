@@ -104,7 +104,7 @@ export function validateChat(body, ollamaConfigured = false) {
   return { provider, model, messages: cleanMessages, searchMode, canvasFiles, resumeBlock };
 }
 
-export function buildRequest({ provider, model, messages, searchMode = 'off', searchPerformed = false, systemPrompt, canvasFiles = [] }, key, ollamaBaseUrl) {
+export function buildRequest({ provider, model, messages, searchMode = 'off', searchPerformed = false, systemPrompt, canvasFiles = [], references = '' }, key, ollamaBaseUrl) {
   // Design knowledge is worth its tokens only when the request is design work.
   // Judged on the oldest and newest thing the user asked for: the newest is
   // usually the real question, but after a page is fetched the newest message
@@ -112,7 +112,11 @@ export function buildRequest({ provider, model, messages, searchMode = 'off', se
   // code actually gets written would defeat the point of fetching it.
   const userMessages = messages.filter((message) => message.role === 'user');
   const design = isDesignRequest(userMessages.at(0)?.content) || isDesignRequest(userMessages.at(-1)?.content);
-  const prompt = systemPrompt || buildAssistantPrompt({ provider, model, searchMode, searchPerformed, canvasFiles, design });
+  // References the server fetched for this request are appended last so they
+  // arrive after the identity and the protocol, where the model is most likely
+  // to treat them as material rather than instructions.
+  const base = systemPrompt || buildAssistantPrompt({ provider, model, searchMode, searchPerformed, canvasFiles, design });
+  const prompt = references ? `${base}\n\n${references}` : base;
   if (provider !== 'ollama' && !key) {
     throw new RequestError(401, `Connect your ${providerName(provider)} API key in Settings to continue.`);
   }

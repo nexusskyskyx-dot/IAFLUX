@@ -17,6 +17,7 @@ export type StreamEvent =
       raw?: string;
     }
   | { type: 'browse'; action: 'url_fetch'; url: string; status: 'done' | 'invalid'; error?: string }
+  | { type: 'references'; results: BrowseResult[] }
   | { type: 'error'; message: string };
 
 /**

@@ -7,7 +7,7 @@
     "dev": "node server/index.mjs",
     "build": "tsc --noEmit && vite build",
     "start": "NODE_ENV=production node server/index.mjs",
-    "test": "node --experimental-strip-types --test server/*.test.mjs src/lib/*.test.mjs"
+    "test": "AIFLUX_PRIME_REFERENCES=0 node --experimental-strip-types --test server/*.test.mjs src/lib/*.test.mjs"
   },
   "dependencies": {
     "@codemirror/lang-css": "^6.3.1",

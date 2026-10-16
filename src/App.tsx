@@ -312,6 +312,12 @@ export default function App() {
                 responseText += event.text;
                 patchMessage(chatId, assistantId, (message) => ({ ...message, content: message.content + event.text }));
               }
+              if (event.type === 'references') {
+                // The server opened these before the model started writing, so
+                // they are already answered: record them, never re-fetch.
+                patchMessage(chatId, assistantId, (message) => ({ ...message, browses: [...(message.browses || []), ...event.results] }));
+                return;
+              }
               if (event.type === 'browse') {
                 // Not a file: a request to read a page. Recorded, then opened
                 // once the turn ends so the model can carry on with the result.

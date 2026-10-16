@@ -10,6 +10,8 @@ import {
 import { planWebSearch, searchWeb, withSearchContext } from './search.mjs';
 import { createFileOpParser } from './file-ops.mjs';
 import { browse, describeBrowse, BrowseError } from './browse.mjs';
+import { isDesignRequest } from './design-profile.mjs';
+import { primeDesignReferences, primingEnabled } from './design-references.mjs';
 
 const app = express();
 const ollamaBaseUrl = process.env.OLLAMA_BASE_URL?.trim() || '';
@@ -183,8 +185,32 @@ app.post('/api/chat', rateLimit, async (req, res) => {
     const suppliedSearchKey = req.get('x-aiflux-search-key')?.trim() || '';
     if (suppliedKey.length > 512 || suppliedSearchKey.length > 512) throw new RequestError(400, 'Invalid API key.');
     const key = suppliedKey || envKeys[input.provider] || '';
+
+    // Asked for a page, the model starts writing code at once and never looks
+    // anything up, because writing is the instruction it is trying to obey and
+    // browsing was only ever optional. So for design work the server opens the
+    // references itself, first, and the model gets them before its first token.
+    // Best-effort: a gallery that is slow or unreachable costs a few seconds
+    // and changes nothing else about the answer.
+    // Open the stream first: the references take a moment, and a connection
+    // that is already live can report them instead of sitting in silence.
+    startStream(res, input.model);
+    stopKeepAlive = startKeepAlive(res);
+
+    let primed = null;
+    const newestUserMessage = [...input.messages].reverse().find((message) => message.role === 'user');
+    if (input.searchMode === 'off' && primingEnabled() && isDesignRequest(newestUserMessage?.content) && !controller.signal.aborted) {
+      try {
+        primed = await primeDesignReferences(newestUserMessage.content);
+      } catch {
+        primed = null; // never let a reference fetch break an answer
+      }
+    }
+
     // Check the model connection before making any search calls.
-    let { url, options, format } = buildRequest(input, key, ollamaBaseUrl);
+    let { url, options, format } = buildRequest({ ...input, references: primed?.note || '' }, key, ollamaBaseUrl);
+    input.references = primed?.note || '';
+    if (input.searchMode !== 'off') input.references = primed?.note || '';
     if (input.searchMode !== 'off') {
       startStream(res, input.model);
       stopKeepAlive = startKeepAlive(res);
@@ -194,7 +220,7 @@ app.post('/api/chat', rateLimit, async (req, res) => {
         sendEvent(res, { type: 'search', phase: 'searching', query });
         const sources = await searchWeb(query, suppliedSearchKey || envSearchKey, { signal: controller.signal });
         sendEvent(res, { type: 'sources', query, sources });
-        ({ url, options, format } = buildRequest(withSearchContext(input, query, sources), key, ollamaBaseUrl));
+        ({ url, options, format } = buildRequest({ ...withSearchContext(input, query, sources), references: primed?.note || '' }, key, ollamaBaseUrl));
       } else {
         // The already-built answer request has the full AIFLUX profile plus
         // a mode-specific warning that no live search was performed.
@@ -209,6 +235,7 @@ app.post('/api/chat', rateLimit, async (req, res) => {
     if (!upstream.body) throw new RequestError(502, 'The provider returned an empty response.');
     startStream(res, input.model);
     stopKeepAlive ??= startKeepAlive(res);
+    if (primed?.results?.length) sendEvent(res, { type: 'references', results: primed.results });
     let usedModel = input.model;
     let hasText = false;
     // Prose reaches the chat as usual; tagged file writes are lifted out of the
