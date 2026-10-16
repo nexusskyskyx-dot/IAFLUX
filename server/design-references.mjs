@@ -20,6 +20,8 @@ export const PRIME_BUDGET_MS = 8_000;
 const CACHE_TTL_MS = 30 * 60_000;
 const CACHE_MAX = 50;
 const MAX_REFERENCES = 24;
+/** Featured sites to open alongside the gallery, within the same time budget. */
+const MAX_FEATURED = 2;
 
 const cache = new Map();
 
@@ -63,7 +65,8 @@ export async function primeDesignReferences(text, options = {}) {
   if (cached && now() - cached.at < CACHE_TTL_MS) return cached;
 
   const fetched = [];
-  const attempt = async (url) => {
+  const labels = [];
+  const attempt = async (url, label = '') => {
     const remaining = deadline - now();
     // Out of budget: say nothing at all rather than reporting a page that was
     // never actually requested as one that failed.
@@ -71,20 +74,30 @@ export async function primeDesignReferences(text, options = {}) {
     try {
       const result = await browseImpl(url, { timeoutMs: Math.min(6_000, remaining) });
       fetched.push({ url, result });
+      labels.push(label);
       return result?.ok ? result : null;
     } catch (error) {
       fetched.push({ url, result: null, error: error?.message || 'the page could not be opened' });
+      labels.push(label);
       return null;
     }
   };
 
   const gallery = await attempt(galleryUrl);
-  let featuredName = '';
   if (gallery) {
-    // The gallery's own page is mostly navigation. The sites it points at are
-    // the work, so open one of those too and let the model study a real design.
-    const featured = (gallery.references || []).find((reference) => reference.external && /^https?:\/\//i.test(reference.url));
-    if (featured) { featuredName = featured.name; await attempt(featured.url); }
+    // The gallery's own page is mostly navigation; the sites it points at are
+    // the work. Two of them, from different studios, so the model sees a
+    // consensus about what good looks like rather than one house style.
+    const seenHosts = new Set();
+    for (const reference of gallery.references || []) {
+      if (fetched.length > MAX_FEATURED) break; // gallery + MAX_FEATURED
+      if (!reference.external || !/^https?:\/\//i.test(reference.url)) continue;
+      let host = '';
+      try { host = new URL(reference.url).hostname.replace(/^www\./, ''); } catch { continue; }
+      if (seenHosts.has(host)) continue;
+      seenHosts.add(host);
+      await attempt(reference.url, reference.name);
+    }
   }
 
   const results = fetched.map(({ url, result, error }) => ({
@@ -99,7 +112,7 @@ export async function primeDesignReferences(text, options = {}) {
   fetched.forEach(({ url, result }, index) => {
     if (!result?.ok) return;
     const lines = [`--- ${result.finalUrl || url} ---`];
-    if (index === 1 && featuredName) lines.push(`One of the sites featured above: ${featuredName}.`);
+    if (index > 0 && labels[index]) lines.push(`One of the sites featured above: ${labels[index]}.`);
     lines.push(trimSummary(describeBrowse(result)));
     if (index === 0 && result.references?.length) {
       lines.push('', 'Award-winning sites this page is featuring:',

@@ -28,7 +28,7 @@ test('the gallery chosen matches the kind of page being asked for', () => {
   assert.equal(galleryUrlFor(''), 'https://land-book.com/');
 });
 
-test('a design request opens the gallery and one of the sites it features', async () => {
+test('a design request opens the gallery and the sites it features', async () => {
   const called = [];
   const primed = await primeDesignReferences('make me a landing page', {
     browseImpl: async (url) => {
@@ -38,14 +38,40 @@ test('a design request opens the gallery and one of the sites it features', asyn
           { name: 'Zaro', url: 'https://zaro.ai/', external: true },
           { name: 'Fernand', url: 'https://getfernand.com/', external: true },
         ])
-        : siteResult('https://zaro.ai/', 'Zaro');
+        : siteResult(url, url.includes('zaro') ? 'Zaro' : 'Fernand');
     },
   });
 
-  assert.deepEqual(called, ['https://land-book.com/design/landing-page', 'https://zaro.ai/']);
-  assert.equal(primed.results.length, 2);
+  assert.deepEqual(called, [
+    'https://land-book.com/design/landing-page',
+    'https://zaro.ai/',
+    'https://getfernand.com/',
+  ]);
+  assert.equal(primed.results.length, 3);
   assert.ok(primed.results.every((result) => result.ok));
   assert.equal(primed.results[0].title, 'Landing page designs');
+  assert.match(primed.note, /One of the sites featured above: Zaro/);
+  assert.match(primed.note, /One of the sites featured above: Fernand/);
+});
+
+test('two featured sites come from different studios, and no more than two', async () => {
+  const called = [];
+  // Four featured links, two of them on the same host.
+  const primed = await primeDesignReferences('landing page', {
+    browseImpl: async (url) => {
+      called.push(url);
+      return called.length === 1
+        ? galleryResult(url, [
+          { name: 'A', url: 'https://one.test/', external: true },
+          { name: 'A again', url: 'https://one.test/other', external: true },
+          { name: 'B', url: 'https://two.test/', external: true },
+          { name: 'C', url: 'https://three.test/', external: true },
+        ])
+        : siteResult(url, url);
+    },
+  });
+  assert.deepEqual(called, ['https://land-book.com/design/landing-page', 'https://one.test/', 'https://two.test/']);
+  assert.equal(primed.results.length, 3, 'gallery plus two, not four');
 });
 
 test('the model is told the references were already retrieved, and that they are data', async () => {
@@ -141,4 +167,23 @@ test('priming can be turned off by the deployment', () => {
   assert.equal(primingEnabled(), true);
   if (previous === undefined) delete process.env.AIFLUX_PRIME_REFERENCES;
   else process.env.AIFLUX_PRIME_REFERENCES = previous;
+});
+
+test('references are primed whether or not web search is also on', async () => {
+  // Priming was once gated on searchMode === 'off', which meant anyone running
+  // Web: Auto or Always silently got no design references at all.
+  const { buildRequest } = await import('./providers.mjs');
+  const source = await import('node:fs/promises').then((fs) => fs.readFile('./server/api-app.mjs', 'utf8'));
+  const gate = source.match(/if \(primingEnabled\(\) && isDesignRequest[\s\S]{0,80}/)?.[0] || '';
+  assert.ok(gate.length > 0, 'the priming gate is findable');
+  assert.doesNotMatch(gate, /searchMode/, 'and it does not depend on the search mode');
+
+  // The prompt still builds with references on a search-mode request.
+  const withRefs = buildRequest({
+    provider: 'ollama', model: 'llama3:latest', searchMode: 'always', searchPerformed: true,
+    messages: [{ role: 'user', content: 'make a landing page' }],
+    references: 'DESIGN REFERENCES ALREADY RETRIEVED',
+  }, '', 'http://127.0.0.1:11434');
+  const system = JSON.parse(withRefs.options.body).messages.find((m) => m.role === 'system').content;
+  assert.match(system, /DESIGN REFERENCES ALREADY RETRIEVED/);
 });

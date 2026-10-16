@@ -65,3 +65,30 @@ test('the playbook names the section vocabulary and an accessibility floor', () 
   assert.match(DESIGN_PLAYBOOK, /prefers-reduced-motion/);
   assert.match(DESIGN_PLAYBOOK, /system font stack|@font-face/);
 });
+
+test('the playbook gives numbers, not principles', () => {
+  // "Use good typography" produces whatever the model saw most often. Concrete
+  // values are the whole point of the module, so assert they are actually there.
+  for (const value of ['clamp(2.75rem, 7vw, 6.5rem)', '-0.03em', '62ch', '1.0625rem', '0 24px 60px -24px', '16px', '#0B0B0F', '#FAF9F7', 'clamp(4.5rem, 10vw, 9rem)']) {
+    assert.ok(DESIGN_PLAYBOOK.includes(value), `missing concrete value: ${value}`);
+  }
+  assert.match(DESIGN_PLAYBOOK, /feTurbulence/, 'and the grain recipe');
+  assert.match(DESIGN_PLAYBOOK, /IntersectionObserver/, 'and how to do scroll reveals');
+  assert.match(DESIGN_PLAYBOOK, /cubic-bezier\(\.2,\.8,\.2,1\)/);
+});
+
+test('every anti-pattern comes with what to do instead', () => {
+  const lines = DESIGN_PLAYBOOK.split('\n').filter((line) => line.startsWith('- '));
+  const avoidStart = lines.findIndex((line) => line.includes('Purple-to-blue gradient hero'));
+  assert.ok(avoidStart > 0, 'the anti-pattern list exists');
+  const avoid = lines.slice(avoidStart, avoidStart + 10);
+  for (const line of avoid) assert.match(line, /->/, `no replacement offered for: ${line.slice(0, 40)}`);
+  assert.ok(avoid.some((line) => /bento/.test(line)), 'including a real layout alternative');
+  assert.ok(avoid.some((line) => /asymmetric/.test(line)));
+});
+
+test('the model is made to commit to a design before it writes', () => {
+  assert.match(DESIGN_PLAYBOOK, /BEFORE YOU WRITE/);
+  assert.match(DESIGN_PLAYBOOK, /Naming the choices first/);
+  assert.match(DESIGN_PLAYBOOK, /starts typing immediately produces its\s+default/);
+});

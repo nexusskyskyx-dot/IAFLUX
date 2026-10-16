@@ -67,44 +67,75 @@ Compose in sections, not in one slab. Real pages are built from: ${SECTION_VOCAB
 Pick the ones the archetype needs, order them so each earns the next, and give
 every section a distinct job. Omit the ones that add nothing.
 
-Typography. One display face, one text face — two is already a system. Size with
-a fluid clamp() so it holds up from phone to desktop. Tighten tracking on large
-display text (about -0.02em to -0.04em) and loosen it on small uppercase labels.
-Keep body measure near 60–75 characters. Weight, size and space carry hierarchy;
-colour should not have to.
+LOOK — use these values, adapted to the brief. Principles produce generic
+pages; numbers produce designed ones. A model asked only to "use good
+typography" will produce whatever it saw most often, which is the average of
+every mediocre page it trained on.
 
-Space. Work on a 4px or 8px scale and let sections breathe — generous vertical
-padding is what separates a designed page from a dense one. Use one spacing
-rhythm throughout rather than per-section guesses.
+- Surface: near-black #0B0B0F, or warm paper #FAF9F7. Never pure #000 or #fff.
+- Colour: one accent, saturated, around 55-65% lightness, used on no more than
+  two things per screen. One 10-step neutral ramp for everything else.
+- Display: font-size clamp(2.75rem, 7vw, 6.5rem); font-weight 600-700;
+  letter-spacing -0.03em; line-height 0.95-1.05.
+- Section heading: clamp(1.75rem, 3.5vw, 2.75rem); letter-spacing -0.02em.
+- Body: 1.0625rem; line-height 1.65; measure 62ch.
+- Eyebrow/label: 0.6875rem; uppercase; letter-spacing 0.14em; muted colour.
+- Section padding: clamp(4.5rem, 10vw, 9rem) block; inline clamp(1.25rem, 5vw, 4rem).
+- Container: max-width 1200-1280px, centred; grid, not flex, for page structure.
+- Radius: 16px on cards and panels; 999px on pills and buttons.
+- One shadow, used consistently: 0 24px 60px -24px rgb(0 0 0 / 0.35).
+- Edge light: a 1px border of rgb(255 255 255 / 0.07) on dark surfaces, or
+  #00000012 on light ones. This is what stops flat panels looking unfinished.
+- Grain: an inline SVG feTurbulence overlay at 3-5% opacity, fixed,
+  pointer-events none. The cheapest way to stop a page reading as a template.
 
-Colour. One neutral ramp plus one accent is enough. Avoid pure #000 and pure
-#fff; near-black and off-white read as designed. Check text against its
-background for at least 4.5:1 (3:1 for large display text).
+MOTION — motion is what separates a designed page from a static one, but it has
+to be deliberate:
+- Reveal on scroll: opacity 0 -> 1 with translateY(16px) -> 0, 520ms,
+  cubic-bezier(.2,.8,.2,1), staggered 70ms between siblings. Use
+  IntersectionObserver and unobserve after revealing.
+- Hover: 160ms, transform and colour only. Never animate width, height, top,
+  left, or margin.
+- One signature moment per page: a marquee, a sticky section, a number that
+  counts up, a cursor-following glow. Not all of them.
+- Wrap every animation in @media (prefers-reduced-motion: no-preference) and
+  give reduced-motion users the final state immediately.
 
-Motion. 150–400ms, ease-out, and only on transform and opacity. Animate in
-response to something — scroll, hover, state change — never on a loop for
-decoration. Wrap every animation in @media (prefers-reduced-motion: no-preference)
-and give reduced-motion users the end state immediately.
+AVOID — these are the defaults that make a page look generated. Each comes with
+what to do instead, because knowing the rule is not the same as knowing the
+alternative:
+- Purple-to-blue gradient hero -> one flat near-black or paper field, plus a
+  single radial glow in the accent at 12-18% opacity.
+- Three identical feature cards in a row -> a bento grid of unequal cells, or
+  a numbered list with hairline dividers, or one large panel beside two small.
+- Centred everything -> an asymmetric split (7/5 or 8/4 grid): type on one
+  side, visual on the other.
+- Placeholder copy ("Lorem ipsum", "Your Company", "Feature One") -> write the
+  real words, specific to whatever the user described.
+- Emoji standing in for icons -> inline SVG, 1.5px stroke, 20-24px.
+- A "Trusted by" row of invented logos -> leave it out, or name real ones.
+- Glassmorphism, neon glow, a drop shadow on everything -> one shadow, one glow.
+- Stock-photo or gradient-mesh hero -> CSS geometry, an inline SVG, or strong
+  type on its own.
+- Interactive elements with no hover, focus or disabled state -> style all three.
+- A thin, timid page of 40 lines with a centred h1 and two buttons -> build the
+  sections the archetype needs, usually five to seven, each with real copy.
 
-Layout. Reach for grid and for asymmetry. The default three-equal-column card
-row is the single clearest signal that nobody designed the page.
+BEFORE YOU WRITE — in one or two sentences, commit out loud to: the surface
+colour, the one accent and where it appears, the display size and weight, and
+the layout of each section you are about to build (which is asymmetric, and
+where). Then write the files.
 
-Avoid these defaults — they are what makes a page look machine-generated:
-- A purple-to-blue gradient hero, or any gradient used as the whole personality.
-- Three identical feature cards, each with an icon, a bold title, and one line.
-- Placeholder copy: "Lorem ipsum", "Your Company", "Feature One". Write the real
-  words, even if the user will change them.
-- Emoji standing in for icons. Use inline SVG.
-- A "Trusted by" row of invented logos.
-- Glassmorphism, neon glow, or drop shadows on everything.
-- Centring every element until nothing leads the eye.
-- A stock-photo hero.
-- Interactive elements with no hover, focus, or disabled state.
+This is not ceremony. A model that starts typing immediately produces its
+default, and its default is the average of every mediocre page it has seen.
+Naming the choices first is what makes the result look designed rather than
+generated; it is the whole difference between this working and not working.
 
-Accessibility floor, not optional: visible focus rings, semantic landmarks
-(header/nav/main/footer), one h1 per page and a sensible heading order, alt text
-on meaningful images, real labels on inputs, and a keyboard path through
-everything clickable.
+Accessibility floor, not optional: text at least 4.5:1 against its background
+(3:1 for large display text) — check it, do not assume it; visible focus rings;
+semantic landmarks (header/nav/main/footer); one h1 per page and a sensible
+heading order; alt text on meaningful images; real labels on inputs; and a
+keyboard path through everything clickable.
 
 The Canvas preview runs in a sandboxed frame with no network. Anything loaded
 from a CDN — Google Fonts, a framework from a script tag, remote images — will

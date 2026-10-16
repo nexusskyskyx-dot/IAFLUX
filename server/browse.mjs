@@ -399,7 +399,21 @@ const GALLERY_HOSTS = new Set(['land-book.com', 'www.land-book.com', 'godly.desi
 
 // Galleries label the outbound link "Visit", which tells the model nothing
 // about which site it is looking at. Fall back to the domain name instead.
-const GENERIC_LINK_LABELS = /^(visit|view|view site|view website|see|live|open|go|launch|demo|website|site|link|read more|learn more)$/i;
+// Galleries say "Visit website", "View site", "See live" and so on. None of
+// those name anything, so the domain is used instead. Matched on the first
+// word rather than the whole string, because the suffixes vary endlessly.
+const GENERIC_LINK_LABELS = /^(visit|view|see|open|go|launch|demo|watch|explore|browse|check|preview|live|website|site|link|read more|learn more|more)\b/i;
+
+/** The words an anchor carries: its text, else its image's alt, else its title. */
+function anchorText(inner, attrs) {
+  const text = stripTags(inner);
+  if (text) return text;
+  const alt = decodeEntities(inner.match(/<img\b[^>]*\balt\s*=\s*["']([^"']+)["']/i)?.[1] || '').trim();
+  // Alt text on a gallery is "Zaro | Make your company AI-ready - Landing
+  // design inspiration": the name is the part before the dash or pipe.
+  if (alt) return alt.split(/\s+[—–|-]\s+/)[0].trim() || alt;
+  return decodeEntities(attrs.match(/\btitle\s*=\s*["']([^"']+)["']/i)?.[1] || '').trim();
+}
 
 function referenceName(label, url) {
   const cleaned = String(label || '').trim();
@@ -425,10 +439,10 @@ export function extractReferences(html, finalUrl) {
 
   const seen = new Set();
   const references = [];
-  const pattern = /<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  const pattern = /<a\b([^>]*?)href\s*=\s*["']([^"']+)["']([^>]*)>([\s\S]*?)<\/a>/gi;
   for (const match of html.matchAll(pattern)) {
-    const href = decodeEntities(match[1]);
-    const label = stripTags(match[2]);
+    const href = decodeEntities(match[2]);
+    const label = anchorText(match[4], `${match[1]} ${match[3]}`);
     if (!label || label.length > 120) continue;
     let target;
     try { target = new URL(href, finalUrl); } catch { continue; }

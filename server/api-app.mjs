@@ -199,7 +199,9 @@ app.post('/api/chat', rateLimit, async (req, res) => {
 
     let primed = null;
     const newestUserMessage = [...input.messages].reverse().find((message) => message.role === 'user');
-    if (input.searchMode === 'off' && primingEnabled() && isDesignRequest(newestUserMessage?.content) && !controller.signal.aborted) {
+    // Not gated on search mode: a design request deserves its references
+    // whether or not web search is also running for this message.
+    if (primingEnabled() && isDesignRequest(newestUserMessage?.content) && !controller.signal.aborted) {
       try {
         primed = await primeDesignReferences(newestUserMessage.content);
       } catch {

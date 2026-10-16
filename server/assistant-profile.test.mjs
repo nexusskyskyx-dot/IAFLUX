@@ -163,7 +163,7 @@ test('design knowledge is added for design work and withheld otherwise', () => {
 
 test('the playbook warns about the tell-tale defaults of a generated page', () => {
   const prompt = buildAssistantPrompt({ provider: 'gemini', model: models.gemini, design: true });
-  for (const pattern of [/purple-to-blue gradient/, /Three identical feature cards/, /Lorem ipsum/, /Emoji standing in for icons/]) {
+  for (const pattern of [/Purple-to-blue gradient hero/, /Three identical feature cards/, /Lorem ipsum/, /Emoji standing in for icons/]) {
     assert.match(prompt, pattern);
   }
   assert.match(prompt, /sandboxed frame with no network/, 'and about the sandbox the preview runs in');
