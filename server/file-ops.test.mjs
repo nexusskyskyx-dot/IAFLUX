@@ -192,29 +192,53 @@ test('ordinary HTML and comparison operators stay in the prose', () => {
   assert.deepEqual(ops, []);
 });
 
-// Agentic models invent tool calls to read data they were not given. AIFLUX has
-// no such capability, so the invocation is dropped rather than shown to the user.
-test('an invented tool call is dropped instead of reaching the chat', () => {
-  const tag = '<url_fetch> https://app.aiflux.workers.dev/canvas/getFile?file=index.html </url_fetch>';
-  for (const chunks of [[`Let me check.\n${tag}\nHere you go.`], tag.match(/[\s\S]{1,7}/g) || []]) {
+// Reading a page is now a real capability, so the tag the model invented has a
+// meaning — but the text of the invocation must still never reach the chat.
+test('a url_fetch is lifted out of the stream as a real request', () => {
+  const reply = 'Let me check the reference.\n<url_fetch> https://land-book.com/design/landing-page </url_fetch>\nHere you go.';
+  for (const chunks of [[reply], reply.match(/[\s\S]{1,7}/g) || []]) {
     const { text, ops } = collect(chunks);
-    assert.deepEqual(ops, [], 'no file operation is produced');
-    assert.doesNotMatch(text, /url_fetch/, 'the fabricated tag is not shown');
-    assert.doesNotMatch(text, /workers\.dev/, 'nor the fabricated endpoint');
+    assert.equal(text, 'Let me check the reference.\n\nHere you go.', 'the invocation itself is not shown');
+    assert.equal(ops.length, 1);
+    assert.equal(ops[0].action, 'url_fetch');
+    assert.equal(ops[0].status, 'done');
+    assert.equal(ops[0].url, 'https://land-book.com/design/landing-page');
   }
-  assert.equal(collect(['Let me check.\n' + tag + '\nHere you go.']).text, 'Let me check.\n\nHere you go.');
 });
 
-test('other invented tool tags are dropped the same way', () => {
-  for (const tag of ['url_fetch', 'read_file', 'tool_call', 'function_call', 'web_fetch', 'get_file']) {
-    const { text, ops } = collect([`<${tag}>path/to/thing</${tag}>`]);
-    assert.deepEqual(ops, [], tag);
+test('every tag an agentic model reaches for to open a page works the same way', () => {
+  for (const tag of ['url_fetch', 'fetch_url', 'urlfetch', 'web_fetch', 'browse', 'visit']) {
+    const { text, ops } = collect([`<${tag}>https://godly.design/</${tag}>`]);
+    assert.equal(ops.length, 1, tag);
+    assert.equal(ops[0].url, 'https://godly.design/', tag);
     assert.equal(text, '', tag);
   }
 });
 
-test('an invented tool call that is never closed does not swallow the reply', () => {
+test('a url_fetch written as a Markdown link is understood', () => {
+  const { ops } = collect(['<url_fetch>[Landing designs](https://land-book.com/design/landing-page)</url_fetch>']);
+  assert.equal(ops[0].url, 'https://land-book.com/design/landing-page');
+});
+
+test('a url_fetch with nothing fetchable in it is refused, not opened blindly', () => {
+  const { text, ops } = collect(['<url_fetch>the landing page I mentioned</url_fetch>']);
+  assert.equal(ops[0].status, 'invalid');
+  assert.match(ops[0].error, /no URL/);
+  assert.equal(text, '', 'and it is not shown to the user either');
+});
+
+test('a fetch tag that is never closed does not swallow the reply', () => {
   const { text, ops } = collect(['Before. <url_fetch> https://example.com/x']);
-  assert.deepEqual(ops, []);
+  assert.deepEqual(ops, [], 'an unterminated request is never acted on');
   assert.equal(text, 'Before. ', 'the tag is dropped; nothing after it was written');
+});
+
+// Canvas contents arrive with every request, so there is still no file-read
+// capability to offer — and no reason to show the user an invented one.
+test('tags asking to read a file are dropped, because the canvas is already sent', () => {
+  for (const tag of ['read_file', 'file_read', 'get_file', 'tool_call', 'tool_use', 'function_call']) {
+    const { text, ops } = collect([`Intro. <${tag}>index.html</${tag}> Outro.`]);
+    assert.deepEqual(ops, [], tag);
+    assert.equal(text, 'Intro.  Outro.', tag);
+  }
 });

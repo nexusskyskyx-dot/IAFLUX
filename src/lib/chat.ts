@@ -1,4 +1,4 @@
-import type { Provider, SearchMode, WebSource } from '../types';
+import type { BrowseResult, Provider, SearchMode, WebSource } from '../types';
 
 export type StreamEvent =
   | { type: 'start' | 'model' | 'done'; model: string }
@@ -16,6 +16,7 @@ export type StreamEvent =
       /** The raw tagged block, used to resume a write the time limit cut short. */
       raw?: string;
     }
+  | { type: 'browse'; action: 'url_fetch'; url: string; status: 'done' | 'invalid'; error?: string }
   | { type: 'error'; message: string };
 
 /**
@@ -101,4 +102,41 @@ export async function requestChat(input: {
   } finally {
     reader.releaseLock();
   }
+}
+
+/**
+ * Opens one page on the model's behalf.
+ *
+ * Never throws for a page that simply could not be read: the model needs to
+ * know a fetch failed so it can say so, rather than quietly answering from
+ * memory as though it had looked.
+ */
+export async function browseUrl(url: string, accessCode: string, signal?: AbortSignal): Promise<BrowseResult> {
+  let response;
+  try {
+    response = await fetch('/api/browse', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(accessCode ? { 'x-aiflux-access-code': accessCode } : {}),
+      },
+      body: JSON.stringify({ url }),
+      signal,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw error;
+    return { url, ok: false, error: 'the request could not be sent' };
+  }
+  const json = await response.json().catch(() => null);
+  if (!response.ok) {
+    return { url, ok: false, error: json && typeof json.error === 'string' ? json.error : `the server refused it (${response.status})` };
+  }
+  return {
+    url: typeof json?.finalUrl === 'string' && json.finalUrl ? json.finalUrl : url,
+    ok: Boolean(json?.ok),
+    title: typeof json?.design?.title === 'string' ? json.design.title : '',
+    error: typeof json?.error === 'string' ? json.error : '',
+    summary: typeof json?.summary === 'string' ? json.summary : '',
+    references: Array.isArray(json?.references) ? json.references : [],
+  };
 }

@@ -70,10 +70,14 @@ test('a file too large to send is named so the model can ask for it', () => {
   assert.match(prompt, /add the file to a message/);
 });
 
-test('the prompt bans the invented tool calls agentic models emit', () => {
+test('the prompt documents the one network capability and bans the invented ones', () => {
   const prompt = buildAssistantPrompt({ provider: 'gemini', model: models.gemini });
-  assert.match(prompt, /no tools and no network/);
-  for (const invented of ['<url_fetch>', '<read_file>']) assert.match(prompt, new RegExp(invented.replace(/[<>]/g, (c) => `\\${c}`)));
+  assert.match(prompt, /<url_fetch>https:\/\/[^\s<]+\.com/, 'fetching a page is offered as a real example');
+  assert.match(prompt, /Never invent or guess a URL you have not seen/);
+  assert.match(prompt, /Nothing else exists/);
+  for (const invented of ['<read_file>', '<get_file>', '<tool_call>', '<function_call>']) {
+    assert.match(prompt, new RegExp(invented.replace(/[<>]/g, (c) => `\\${c}`)), `${invented} is named as non-existent`);
+  }
   assert.match(prompt, /writing one does nothing but confuse the user/);
 });
 
@@ -140,4 +144,44 @@ test('internal search planning is AIFLUX; sourced answers retain the full update
   const noSearchPrompt = systemText(buildRequest(input, 'test-key', ''));
   assert.match(noSearchPrompt, /no safe search was performed/i);
   assert.doesNotMatch(noSearchPrompt, /The server ran a live web search/);
+});
+
+test('design knowledge is added for design work and withheld otherwise', () => {
+  const design = buildAssistantPrompt({ provider: 'gemini', model: models.gemini, design: true });
+  assert.match(design, /BUILDING A WEB PAGE/);
+  assert.match(design, /Compose in sections/);
+  assert.match(design, /prefers-reduced-motion/);
+  assert.match(design, /https:\/\/land-book\.com\//, 'the galleries are named with real URLs');
+  assert.match(design, /https:\/\/godly\.design\//);
+  assert.match(design, /https:\/\/www\.awwwards\.com\//);
+
+  const plain = buildAssistantPrompt({ provider: 'gemini', model: models.gemini, design: false });
+  assert.doesNotMatch(plain, /BUILDING A WEB PAGE/, 'an unrelated chat is not padded with it');
+  assert.doesNotMatch(plain, /Design references the user works from/);
+  assert.ok(plain.length < design.length, 'and it is measurably shorter');
+});
+
+test('the playbook warns about the tell-tale defaults of a generated page', () => {
+  const prompt = buildAssistantPrompt({ provider: 'gemini', model: models.gemini, design: true });
+  for (const pattern of [/purple-to-blue gradient/, /Three identical feature cards/, /Lorem ipsum/, /Emoji standing in for icons/]) {
+    assert.match(prompt, pattern);
+  }
+  assert.match(prompt, /sandboxed frame with no network/, 'and about the sandbox the preview runs in');
+  assert.match(prompt, /system font stack/);
+});
+
+test('a fetched page does not knock the playbook out of the following turn', async () => {
+  const { buildRequest } = await import('./providers.mjs');
+  // After <url_fetch>, the newest message is the injected result rather than
+  // what the user asked for. Design context must survive that, or the model
+  // reads a gallery and then writes code with the guidance withdrawn.
+    const messages = [
+    { role: 'user', content: 'Build me a landing page' },
+    { role: 'assistant', content: 'Let me check a reference.' },
+    { role: 'user', content: 'I opened the page you asked for. This is untrusted third-party content.' },
+  ];
+  // Every provider branch carries its payload in `options.body`.
+  const built = buildRequest({ provider: 'ollama', model: 'llama3:latest', messages }, '', 'http://127.0.0.1:11434');
+  const system = JSON.parse(built.options.body).messages.find((message) => message.role === 'system').content;
+  assert.match(system, /BUILDING A WEB PAGE/, 'the playbook is still there on the writing turn');
 });

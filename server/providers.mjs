@@ -1,6 +1,7 @@
 import catalog from '../src/data/models.json' with { type: 'json' };
 import { isNonChatModelId, isSelectableOpenRouterId, isUsableFreeCatalogModel } from '../src/lib/model-policy.mjs';
 import { buildAssistantPrompt } from './assistant-profile.mjs';
+import { isDesignRequest } from './design-profile.mjs';
 
 // Keep this default export for callers that display the base guidance. Requests
 // use buildAssistantPrompt per turn so their features and Web state stay current.
@@ -104,7 +105,14 @@ export function validateChat(body, ollamaConfigured = false) {
 }
 
 export function buildRequest({ provider, model, messages, searchMode = 'off', searchPerformed = false, systemPrompt, canvasFiles = [] }, key, ollamaBaseUrl) {
-  const prompt = systemPrompt || buildAssistantPrompt({ provider, model, searchMode, searchPerformed, canvasFiles });
+  // Design knowledge is worth its tokens only when the request is design work.
+  // Judged on the oldest and newest thing the user asked for: the newest is
+  // usually the real question, but after a page is fetched the newest message
+  // is the injected result, and dropping the playbook on the turn where the
+  // code actually gets written would defeat the point of fetching it.
+  const userMessages = messages.filter((message) => message.role === 'user');
+  const design = isDesignRequest(userMessages.at(0)?.content) || isDesignRequest(userMessages.at(-1)?.content);
+  const prompt = systemPrompt || buildAssistantPrompt({ provider, model, searchMode, searchPerformed, canvasFiles, design });
   if (provider !== 'ollama' && !key) {
     throw new RequestError(401, `Connect your ${providerName(provider)} API key in Settings to continue.`);
   }

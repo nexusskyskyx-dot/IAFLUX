@@ -9,6 +9,7 @@ import {
 } from './providers.mjs';
 import { planWebSearch, searchWeb, withSearchContext } from './search.mjs';
 import { createFileOpParser } from './file-ops.mjs';
+import { browse, describeBrowse, BrowseError } from './browse.mjs';
 
 const app = express();
 const ollamaBaseUrl = process.env.OLLAMA_BASE_URL?.trim() || '';
@@ -215,7 +216,7 @@ app.post('/api/chat', rateLimit, async (req, res) => {
     // the code.
     const parser = createFileOpParser({
       onText: (text) => sendEvent(res, { type: 'delta', text }),
-      onOp: (op) => sendEvent(res, { type: 'file', ...op }),
+      onOp: (op) => sendEvent(res, op.action === 'url_fetch' ? { type: 'browse', ...op } : { type: 'file', ...op }),
     });
     // Replay the block the last attempt was cut off inside, so this stream
     // finishes the very same write rather than opening a second one.
@@ -275,6 +276,37 @@ app.post('/api/chat', rateLimit, async (req, res) => {
   } finally {
     clearTimeout(timeout);
     stopKeepAlive?.();
+  }
+});
+
+// The model asks for a page with <url_fetch>; this is the other half. It runs on
+// the server because a browser cannot read a third-party page, and it is separate
+// from /api/chat because one fetch must not hold a whole generation open.
+app.post('/api/browse', rateLimit, async (req, res) => {
+  try {
+    if (!correctAccessCode(req.get('x-aiflux-access-code'))) {
+      return res.status(403).json({ error: 'Enter the workspace access code in Settings to continue.' });
+    }
+    const url = typeof req.body?.url === 'string' ? req.body.url.trim() : '';
+    if (!url) return res.status(400).json({ error: 'No URL provided.' });
+    if (url.length > 2_000) return res.status(400).json({ error: 'That URL is too long.' });
+
+    // Reaching out to a third party and parsing the answer costs far more than a
+    // chat turn, so browsing gets its own tighter allowance inside the window.
+    const window = limits.get(clientKey(req));
+    window.browses = (window.browses || 0) + 1;
+    if (window.browses > 20) {
+      return res.status(429).json({ error: 'Too many pages opened from this workspace. Try again in a few minutes.' });
+    }
+
+    const result = await browse(url);
+    res.json({ ...result, summary: describeBrowse(result) });
+  } catch (error) {
+    if (error instanceof BrowseError) {
+      const status = ['bad_url', 'bad_scheme'].includes(error.code) ? 400 : 422;
+      return res.status(status).json({ error: error.message, code: error.code });
+    }
+    res.status(502).json({ error: 'Could not open that page.' });
   }
 });
 

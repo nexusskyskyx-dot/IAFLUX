@@ -16,6 +16,7 @@
  *   >>>>>>> REPLACE
  *   </aiflux-patch>
  *   <aiflux-delete path="src/old.js" />
+ *   <url_fetch>https://land-book.com/design/landing-page</url_fetch>
  *
  * Models do not always use our tag. They fall back on wrapper tags they saw in
  * training — <document>, <file>, <artifact> — so those are accepted too: with a
@@ -26,12 +27,19 @@
 const AIFLUX_TAGS = ['aiflux-write', 'aiflux-patch', 'aiflux-delete'];
 const VARIANT_TAGS = ['document', 'file', 'artifact'];
 /**
- * Pseudo tool calls agentic models invent when they want data they were not
- * given — `<url_fetch>`, `<read_file>`, `<tool_call>` and friends. AIFLUX has no
- * such capability, so the invocation is dropped rather than shown to the user.
+ * A request to read a page. Every name here is one an agentic model reaches for
+ * on its own — `<url_fetch>` is the tag the model invented before AIFLUX could
+ * serve it, so rather than fight the instinct the parser honours all of them.
  */
-const IGNORED_TAGS = ['url_fetch', 'fetch_url', 'urlfetch', 'read_file', 'file_read', 'get_file', 'tool_call', 'tool_use', 'function_call', 'browse', 'web_fetch'];
-const TAG_NAMES = [...AIFLUX_TAGS, ...VARIANT_TAGS, ...IGNORED_TAGS];
+const URL_TAGS = ['url_fetch', 'fetch_url', 'urlfetch', 'web_fetch', 'browse', 'visit'];
+/**
+ * Pseudo tool calls that fetch *files the canvas already contains*, plus the
+ * generic wrappers agentic models emit. Canvas contents are sent with every
+ * request, and there is no file-read capability to offer, so these are dropped
+ * whole rather than shown to the user.
+ */
+const IGNORED_TAGS = ['read_file', 'file_read', 'get_file', 'tool_call', 'tool_use', 'function_call'];
+const TAG_NAMES = [...AIFLUX_TAGS, ...VARIANT_TAGS, ...URL_TAGS, ...IGNORED_TAGS];
 const OPEN_TAG = new RegExp(`<(${TAG_NAMES.join('|')})\\b([^>]*)>`, 'i');
 /** A nested operation inside a block means the model re-opened a tag it was in. */
 const NESTED_OP = /<aiflux-(write|patch|delete)\b/i;
@@ -71,6 +79,22 @@ function attribute(attrs, name) {
   const match = attrs.match(new RegExp(`(?:^|\\s)${name}\\s*=\\s*("([^"]*)"|'([^']*)'|([^\\s/>]+))`, 'i'));
   if (!match) return '';
   return match[2] ?? match[3] ?? match[4] ?? '';
+}
+
+/**
+ * The URL inside a fetch tag, whichever way the model wrote it: bare, wrapped
+ * in a Markdown link, or quoted.
+ */
+function urlIn(body) {
+  const text = String(body || '').trim();
+  const linked = text.match(/\]\(\s*(https?:\/\/[^\s)]+)/i)?.[1];
+  const bare = text.match(/https?:\/\/[^\s<>"')\]]+/i)?.[0];
+  const candidate = (linked || bare || '').replace(/[.,;]+$/, '');
+  if (!candidate) return '';
+  try {
+    const url = new URL(candidate);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : '';
+  } catch { return ''; }
 }
 
 /** Models label the target with `path`, `file`, `filename` or `name`. */
@@ -138,6 +162,9 @@ export function createFileOpParser({ onText, onOp, maxBlock = MAX_BLOCK_CHARS } 
     // A pseudo tool call is discarded whole: showing the user a fabricated
     // endpoint they cannot call is worse than showing nothing.
     if (IGNORED_TAGS.includes(tag)) { block = { tag, action: 'ignore', path: '', raw, body: '' }; return; }
+    // Reading a page is real: the server fetches it and the answer comes back
+    // as another turn, so the model never waits on the network mid-sentence.
+    if (URL_TAGS.includes(tag)) { block = { tag, action: 'url_fetch', path: '', raw, body: '' }; return; }
     const path = pathOf(attrs);
     // A variant wrapper only becomes a file when the model named the target.
     // Otherwise it is transparent: the body flows through as ordinary prose.
@@ -150,6 +177,15 @@ export function createFileOpParser({ onText, onOp, maxBlock = MAX_BLOCK_CHARS } 
     const full = raw + body + closeRaw;
     block = null;
     if (action === 'ignore') return;
+    if (action === 'url_fetch') {
+      const url = urlIn(body);
+      if (!url) {
+        onOp({ action: 'url_fetch', url: '', status: 'invalid', error: 'That request had no URL in it.', raw: full });
+        return;
+      }
+      onOp({ action: 'url_fetch', url, status: 'done', raw: full });
+      return;
+    }
     if (action === 'transparent') {
       // A wrapper the model chose for itself. The tags are dropped and the body
       // is re-emitted as a *named* fenced block, so the client's fenced-block
@@ -222,11 +258,13 @@ export function createFileOpParser({ onText, onOp, maxBlock = MAX_BLOCK_CHARS } 
         // A transparent wrapper is only decorative, so its text is prose.
         // An ignored pseudo call is dropped along with its tag, closed or not.
         // A transparent wrapper is only decorative, so its text is prose.
-        // An ignored pseudo call is dropped along with its tag, closed or not.
+        // An ignored pseudo call is dropped along with its tag, closed or not,
+        // and so is a fetch that never closed: its URL may be cut in half, and
+        // a page guessed from a truncated address is worse than no page.
         if (block.action === 'transparent') emit(block.body);
         // An AIFLUX block is incomplete: never applied to a file, but the raw
         // text is returned so the client can resume exactly where it stopped.
-        else if (block.action !== 'ignore') {
+        else if (block.action !== 'ignore' && block.action !== 'url_fetch') {
           onOp({ action: block.action, path: block.path, status: 'incomplete', raw: block.raw + block.body });
         }
         block = null;

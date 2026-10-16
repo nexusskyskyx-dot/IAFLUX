@@ -77,6 +77,28 @@ function FileOpChips({ message, onOpen, onNotify }: { message: ChatMessage; onOp
   </button>)}</div>;
 }
 
+/**
+ * Pages the assistant opened. Shown plainly rather than hidden: an answer built
+ * from a page the user cannot see is an answer they cannot check.
+ */
+function BrowseChips({ message }: { message: ChatMessage }) {
+  if (!message.browses?.length) return null;
+  return <div className="message-browses">{message.browses.map((result, index) => {
+    let host = result.url;
+    try { host = new URL(result.url).hostname.replace(/^www\./, ''); } catch { /* keep the raw string */ }
+    return <a
+      className={`browse-chip ${result.ok ? 'ok' : 'failed'}`} key={`${result.url}-${index}`}
+      href={result.url} target="_blank" rel="noopener noreferrer"
+      title={result.ok ? `Read ${result.url}` : (result.error || 'Could not be read')}
+    >
+      {result.ok ? <Globe2 size={13} /> : <X size={13} />}
+      <span className="browse-chip-host">{host}</span>
+      <span className="browse-chip-state">{result.ok ? (result.title || 'read') : 'could not read'}</span>
+      <ArrowUpRight size={12} />
+    </a>;
+  })}</div>;
+}
+
 function ContinuationNotice({ attempt }: { attempt: number }) {
   return <div className="message-continuation" role="status"><Loader2 size={14} className="continuation-spin" /> Picking the answer back up ({Math.min(attempt + 1, MAX_CONTINUATIONS + 1)} of {MAX_CONTINUATIONS + 1}) — everything written so far is kept.</div>;
 }
@@ -172,6 +194,8 @@ export default function ChatPanel(props: Props) {
           {message.role === 'assistant' && <SearchSources message={message} />}
           {message.role === 'assistant' && !message.content && message.status === 'streaming' ? <div className="thinking-line"><span className="thinking-dots"><i /><i /><i /></span> {message.searchStatus ? 'Checking live sources...' : 'Putting thoughts into motion...'}</div> : message.content ? <MessageBody message={message} onOpenSnippet={props.onOpenSnippet} onNotify={props.onNotify} /> : null}
           {message.role === 'assistant' && message.fileOps?.length ? <FileOpChips message={message} onOpen={props.onOpenFileDiff} onNotify={props.onNotify} /> : null}
+          {message.role === 'assistant' && message.browses?.length ? <BrowseChips message={message} /> : null}
+          {message.role === 'assistant' && message.browsing ? <div className="message-search-progress" role="status"><Loader2 size={14} className="continuation-spin" /> Opening the page…</div> : null}
           {message.role === 'assistant' && message.continuation && message.status === 'streaming' ? <ContinuationNotice attempt={message.continuation} /> : null}
           {message.attachments?.length ? <div className="message-attachments">{message.attachments.map((file, index) => <span key={`${file.name}-${index}`}><FileCode2 size={13} />{file.name}</span>)}</div> : null}
           {message.status === 'error' && <div className="message-interrupted">Response interrupted. You can try sending your message again.</div>}

@@ -6,8 +6,9 @@ import { canvasContext, createDraft, downloadConversation, extractCodeFiles, mer
 import { hasSavedModel, loadActiveId, loadConversations, loadCredentials, loadModel, loadSearchMode, saveActiveId, saveConversations, saveCredentials, saveModel, saveSearchMode } from './lib/storage';
 import { newId } from './lib/id.ts';
 import { isUsableFreeCatalogModel } from './lib/model-policy.mjs';
-import { requestChat } from './lib/chat';
+import { browseUrl, requestChat } from './lib/chat';
 import { MAX_CONTINUATIONS, continuationInstruction, stripOverlap } from './lib/continuation';
+import { MAX_BROWSE_ROUNDS, MAX_BROWSES_PER_ROUND, browseNote } from './lib/browse';
 import { applyFileOp, opResultsForFiles, stripFileBlocks, tidyProse } from './lib/file-ops';
 import { Brand } from './components/Brand';
 import Sidebar from './components/Sidebar';
@@ -221,7 +222,7 @@ export default function App() {
     const userMessage: ChatMessage = { id: newId(), role: 'user', content: text, createdAt: now, attachments };
     const assistantId = newId();
     const assistantMessage: ChatMessage = { id: assistantId, role: 'assistant', content: '', createdAt: now, status: 'streaming', model: selectedModel.name, ...(searchMode !== 'off' ? { searchStatus: 'planning' } : {}) };
-    const history = toProviderMessages([...activeChat.messages, userMessage]);
+    let history = toProviderMessages([...activeChat.messages, userMessage]);
     if (history.reduce((sum, message) => sum + message.content.length, 0) > 180_000) { notify('This message is too long. Remove an attachment or shorten it.'); return false; }
     const updated: Conversation = {
       ...activeChat, title: activeChat.messages.length === 0 ? text.replace(/\s+/g, ' ').slice(0, 53) + (text.length > 53 ? '…' : '') : activeChat.title,
@@ -245,6 +246,12 @@ export default function App() {
     // A write the time limit cut short. Replayed into the next attempt so the
     // model carries on inside the same block instead of starting a new one.
     let pendingBlock = '';
+    // Pages the model asked for with <url_fetch>. Opened after the answer
+    // lands, never during it: the model has already committed to its sentence
+    // by the time the tag closes, so blocking on the network would only stall
+    // the stream. They come back as another turn instead.
+    let requestedUrls: string[] = [];
+    const openedUrls = new Set<string>();
 
     // Writes straight to the canvas. Applied inside the state updater so it
     // always sees the current file list, even if the user edits mid-stream.
@@ -305,6 +312,12 @@ export default function App() {
                 responseText += event.text;
                 patchMessage(chatId, assistantId, (message) => ({ ...message, content: message.content + event.text }));
               }
+              if (event.type === 'browse') {
+                // Not a file: a request to read a page. Recorded, then opened
+                // once the turn ends so the model can carry on with the result.
+                if (event.status === 'done' && event.url) requestedUrls.push(event.url);
+                return;
+              }
               if (event.type === 'file') {
                 // Keep the raw block for resuming, then hand the operation to
                 // the canvas. An incomplete block is never applied: the model
@@ -349,7 +362,45 @@ export default function App() {
       patchMessage(chatId, assistantId, (message) => ({ ...message, content: responseText }));
     };
 
-    void runTurn().then(() => {
+    // After an answer that asked for pages: open them, hand back what they
+    // said, and let the model finish. Repeated only while new pages are still
+    // being requested, and never more than MAX_BROWSE_ROUNDS times.
+    const runBrowseRounds = async (): Promise<void> => {
+      for (let round = 0; round < MAX_BROWSE_ROUNDS; round += 1) {
+        const wanted = [...new Set(requestedUrls)].filter((url) => !openedUrls.has(url)).slice(0, MAX_BROWSES_PER_ROUND);
+        requestedUrls = [];
+        if (!wanted.length || controller.signal.aborted) return;
+        for (const url of wanted) openedUrls.add(url);
+
+        patchMessage(chatId, assistantId, (message) => ({ ...message, browsing: true }));
+        const results = await Promise.all(wanted.map(async (url) => {
+          try {
+            const result = await browseUrl(url, credentials.accessCode, controller.signal);
+            if (result.url && result.url !== url) openedUrls.add(result.url);
+            return result;
+          } catch (error) {
+            if (controller.signal.aborted) throw error;
+            return { url, ok: false, error: error instanceof Error ? error.message : 'the page could not be opened' };
+          }
+        }));
+        if (controller.signal.aborted) return;
+
+        patchMessage(chatId, assistantId, (message) => ({
+          ...message,
+          browsing: false,
+          browses: [...(message.browses || []), ...results],
+        }));
+
+        // The answer so far, then the pages, then let it continue. Prose only:
+        // replaying the tags would make the model think it had already written
+        // the files it is about to write.
+        history = [...history, { role: 'assistant' as const, content: responseText.trim() }, { role: 'user' as const, content: browseNote(results) }];
+        await runTurn();
+        if (controller.signal.aborted) return;
+      }
+    };
+
+    void runTurn().then(() => runBrowseRounds()).then(() => {
       const text = tidyProse(responseText);
       // `summary` is assigned rather than accumulated inside the updater so it
       // stays correct even though React may run the updater more than once.
@@ -376,7 +427,7 @@ export default function App() {
           ...chat, updatedAt: Date.now(), files,
           selectedFileId: generated[0]?.id || chat.selectedFileId,
           messages: chat.messages.map((message) => message.id === assistantId ? {
-            ...message, content, status: 'done', model: actualModel, truncated: endedShort,
+            ...message, content, status: 'done', model: actualModel, truncated: endedShort, browsing: false,
             fileOps: ops.length ? ops : fallbackOps.length ? fallbackOps : undefined,
             continuation: undefined, searchStatus: undefined, searchQuery: undefined,
           } : message),
@@ -387,7 +438,7 @@ export default function App() {
       const aborted = controller.signal.aborted;
       const message = error instanceof Error ? error.message : 'Something went wrong.';
       patchMessage(chatId, assistantId, (previous) => ({
-        ...previous, content: previous.content || (aborted ? 'Generation stopped.' : `**Could not generate a response.** ${message}`), status: 'error', continuation: undefined, searchStatus: undefined, searchQuery: undefined,
+        ...previous, content: previous.content || (aborted ? 'Generation stopped.' : `**Could not generate a response.** ${message}`), status: 'error', continuation: undefined, searchStatus: undefined, searchQuery: undefined, browsing: false,
       }));
       if (!aborted) notify(message);
     }).finally(() => {

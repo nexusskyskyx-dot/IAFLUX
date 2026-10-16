@@ -39,11 +39,28 @@ export interface ChatMessage {
   truncated?: boolean;
   /** Files the assistant wrote straight to the canvas during this answer. */
   fileOps?: FileOpResult[];
+  /** Pages the assistant opened to answer this message. */
+  browses?: BrowseResult[];
+  /** True while those pages are being opened. */
+  browsing?: boolean;
   attachments?: AttachedFile[];
   search?: { query: string; sources: WebSource[] };
   searchSkipped?: boolean;
   searchStatus?: 'planning' | 'searching';
   searchQuery?: string;
+}
+
+/** A page the assistant opened with <url_fetch>. */
+export interface BrowseResult {
+  url: string;
+  ok: boolean;
+  title?: string;
+  /** Why it could not be read, when it could not. */
+  error?: string;
+  /** What the page said, condensed for the model: text plus design signals. */
+  summary?: string;
+  /** Sites a design gallery was featuring, when that is what was opened. */
+  references?: { name: string; url: string }[];
 }
 
 /** A file operation the assistant emitted. */
