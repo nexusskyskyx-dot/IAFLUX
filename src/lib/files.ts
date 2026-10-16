@@ -14,14 +14,14 @@ export const STARTER_CODE = `<!DOCTYPE html>
       margin: 0;
       display: grid;
       place-items: center;
-      background: #111712;
-      color: #f2f7eb;
+      background: #0d0a0e;
+      color: #eae4f0;
       font-family: system-ui, sans-serif;
     }
     .card { text-align: center; padding: 2rem; }
-    .spark { color: #c8f975; font-size: 2.5rem; }
+    .spark { color: #945df9; font-size: 2.5rem; }
     h1 { font-size: clamp(2rem, 6vw, 4rem); margin: .7rem 0; }
-    p { color: #9da99b; line-height: 1.6; }
+    p { color: #978f9d; line-height: 1.6; }
   </style>
 </head>
 <body>

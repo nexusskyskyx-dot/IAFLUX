@@ -23,7 +23,7 @@ export const PROVIDERS: Record<Provider, { name: string; initial: string; descri
   ollama: {
     name: 'Ollama', initial: '◉',
     description: 'Run models privately on the machine hosting AIFLUX.',
-    url: 'https://github.com/ollama/ollama', color: 'lime',
+    url: 'https://github.com/ollama/ollama', color: 'green',
   },
 };
 

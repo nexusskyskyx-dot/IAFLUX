@@ -3,7 +3,7 @@ import { ArrowRight, ArrowUpRight, Braces, Check, ChevronDown, Code2, Copy, File
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { AttachedFile, ChatMessage, Conversation, ModelInfo, Provider, SearchMode } from '../types';
-import { FluxMark, ProviderIcon } from './Brand';
+import { LogoMark, ProviderIcon } from './Brand';
 import ModelPicker from './ModelPicker';
 import { copyToClipboard } from '../lib/clipboard.ts';
 
@@ -30,9 +30,9 @@ interface Props {
 }
 
 const suggestions = [
-  { icon: <WandSparkles size={20} strokeWidth={1.7} />, color: 'lime', title: 'Build a website', desc: 'From idea to first version', prompt: 'Build a beautiful, responsive landing page for a creative studio. Give me one complete HTML file with CSS and a subtle interactive detail.' },
+  { icon: <WandSparkles size={20} strokeWidth={1.7} />, color: 'brand', title: 'Build a website', desc: 'From idea to first version', prompt: 'Build a beautiful, responsive landing page for a creative studio. Give me one complete HTML file with CSS and a subtle interactive detail.' },
   { icon: <Braces size={20} strokeWidth={1.7} />, color: 'blue', title: 'Debug my code', desc: 'Find the issue, fix the flow', prompt: 'Help me debug this code. Explain the root cause clearly, then show the corrected version:\n\n' },
-  { icon: <Lightbulb size={20} strokeWidth={1.7} />, color: 'purple', title: 'Explore an idea', desc: 'Make the what-if real', prompt: 'I have an app idea. Help me refine it, choose a simple tech stack, and map out a first version I can build.' },
+  { icon: <Lightbulb size={20} strokeWidth={1.7} />, color: 'pink', title: 'Explore an idea', desc: 'Make the what-if real', prompt: 'I have an app idea. Help me refine it, choose a simple tech stack, and map out a first version I can build.' },
   { icon: <Code2 size={20} strokeWidth={1.7} />, color: 'orange', title: 'Learn something new', desc: 'Understand it by building it', prompt: 'Explain React hooks using a small, practical example I can edit and run. Walk me through how it works.' },
 ];
 
@@ -136,7 +136,7 @@ export default function ChatPanel(props: Props) {
 
   return <div className={`chat-panel ${messages.length ? 'has-messages' : ''}`}>
     {messages.length === 0 ? <div className="hero-scroll"><div className="welcome">
-      <div className="welcome-art" aria-hidden="true"><span className="welcome-ring welcome-ring-outer" /><span className="welcome-ring welcome-ring-inner" /><span className="welcome-orbit-dot dot-one" /><span className="welcome-orbit-dot dot-two" /><span className="welcome-orbit-dot dot-three" /><span className="welcome-symbol"><FluxMark size={53} /></span><span className="welcome-art-cross cross-one">+</span><span className="welcome-art-cross cross-two">+</span></div>
+      <div className="welcome-art" aria-hidden="true"><span className="welcome-ring welcome-ring-outer" /><span className="welcome-ring welcome-ring-inner" /><span className="welcome-orbit-dot dot-one" /><span className="welcome-orbit-dot dot-two" /><span className="welcome-orbit-dot dot-three" /><span className="welcome-symbol"><LogoMark size={53} /></span><span className="welcome-art-cross cross-one">+</span><span className="welcome-art-cross cross-two">+</span></div>
       <div className="welcome-eyebrow"><span /> YOUR CREATIVE CODING SPACE <span /></div>
       <h1>Make room for<br /><em>what’s next.</em></h1>
       <p className="welcome-description">An idea, a question, a wild what-if. Whatever you’re making, let’s make it remarkable.</p>
@@ -145,7 +145,7 @@ export default function ChatPanel(props: Props) {
       {!props.connected && <button className="hero-connect-link" onClick={props.onSettings}><span className="mini-spark">✳</span> New here? Connect a free model to get started <ArrowRight size={15} /></button>}
     </div></div> : <div className="messages-scroll" ref={scrollRef} onScroll={(event) => { const element = event.currentTarget; stickToBottom.current = element.scrollHeight - element.scrollTop - element.clientHeight < 130; }}><div className="messages-inner"><div className="conversation-start"><span className="conversation-start-icon"><Sparkles size={18} /></span><span>A NEW CONVERSATION</span><p>Every great thing starts somewhere.</p></div>
       {messages.map((message) => <div className={`message message-${message.role}`} key={message.id}>
-        <div className="message-avatar">{message.role === 'assistant' ? <FluxMark size={29} /> : <span>YOU</span>}</div>
+        <div className="message-avatar">{message.role === 'assistant' ? <LogoMark size={29} /> : <span>YOU</span>}</div>
         <div className="message-main"><div className="message-byline"><strong>{message.role === 'assistant' ? 'AIFLUX' : 'You'}</strong><span>{message.role === 'assistant' ? message.model ? message.model.split('/').at(-1)?.replace(':free', '') : 'Coding partner' : new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>
           {message.role === 'assistant' && <SearchSources message={message} />}
           {message.role === 'assistant' && !message.content && message.status === 'streaming' ? <div className="thinking-line"><span className="thinking-dots"><i /><i /><i /></span> {message.searchStatus ? 'Checking live sources...' : 'Putting thoughts into motion...'}</div> : message.content ? <MessageBody message={message} onOpenSnippet={props.onOpenSnippet} onNotify={props.onNotify} /> : null}

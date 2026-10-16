@@ -4,9 +4,14 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "functions": {
-    "api/*.js": { "maxDuration": 60 }
+    "api/*.js": {
+      "maxDuration": 60
+    }
   },
   "rewrites": [
-    { "source": "/:path((?!api/|assets/|favicon.svg).*)", "destination": "/index.html" }
+    {
+      "source": "/:path((?!api/|assets/|[^/]*\\.[a-zA-Z0-9]+$).*)",
+      "destination": "/index.html"
+    }
   ]
 }
