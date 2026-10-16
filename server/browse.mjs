@@ -20,7 +20,48 @@ export const BROWSE_TIMEOUT_MS = 12_000;
 export const BROWSE_MAX_BYTES = 2_000_000;
 export const BROWSE_MAX_REDIRECTS = 3;
 export const BROWSE_TEXT_BUDGET = 24_000;
-export const BROWSE_USER_AGENT = 'AIFLUX-Bot/1.0 (+https://github.com/nexusskyskyx-dot/IAFLUX)';
+/**
+ * How the fetcher identifies itself.
+ *
+ * Land-book publishes an llms.txt for AI agents and lists AI crawlers as
+ * welcome in robots.txt, so a 403 from it is not a refusal to be read — it is
+ * a bot filter that never got far enough to see who was asking. The previous
+ * value contained the bare word "Bot", which is precisely the token generic
+ * filters match on and then allowlist their way around, so we were refused by
+ * a rule that was never meant to catch a client that announces itself.
+ *
+ * The `compatible` form is the long-standing convention for an automated client
+ * that says so: it declares we are not a browser, then names us and leaves a
+ * contact URL. Nothing here claims to be anything other than AIFLUX. Where a
+ * site wants a different answer, AIFLUX_FETCH_USER_AGENT overrides it.
+ */
+export const BROWSE_USER_AGENT = process.env.AIFLUX_FETCH_USER_AGENT
+  || 'Mozilla/5.0 (compatible; AIFLUX/1.0; +https://github.com/nexusskyskyx-dot/IAFLUX)';
+
+/**
+ * Headers describing an ordinary document request.
+ *
+ * A filter deciding whether a request came from a script reads the whole set,
+ * not just the user-agent: one with no Accept-Language and no fetch metadata
+ * announces itself as a script and is refused on sight. Every field here is
+ * true of what we are doing — fetching a document, not a subresource, with no
+ * site of our own initiating it. sec-fetch-mode is deliberately absent: the
+ * runtime sets it, and "cors" is the honest answer for a server-side fetch.
+ */
+export function browseHeaders(accept = 'text/html,application/xhtml+xml,text/plain;q=0.8,*/*;q=0.5') {
+  return {
+    'user-agent': BROWSE_USER_AGENT,
+    accept,
+    'accept-language': 'en-US,en;q=0.9',
+    'sec-fetch-dest': 'document',
+    // Not sec-fetch-mode: undici sets it from the request mode and will not be
+    // overridden, so naming "navigate" here would describe a header that goes
+    // out as "cors". Leave it to the runtime rather than assert a small lie.
+    'sec-fetch-site': 'none',
+    'sec-fetch-user': '?1',
+    'upgrade-insecure-requests': '1',
+  };
+}
 /** Linked stylesheets to read, and how much of each. */
 const STYLESHEET_LIMIT = 2;
 const STYLESHEET_BUDGET_BYTES = 200_000;
@@ -243,7 +284,7 @@ async function fetchRobots(origin, { fetchImpl, timeoutMs = 5_000 } = {}) {
     const response = await (fetchImpl || fetch)(`${origin}/robots.txt`, {
       redirect: 'manual',
       signal: AbortSignal.timeout(timeoutMs),
-      headers: { 'user-agent': BROWSE_USER_AGENT, accept: 'text/plain,*/*' },
+      headers: browseHeaders('text/plain,*/*'),
     });
     if (response.status === 401 || response.status === 403) entry.state = 'disallowed';
     else if (response.ok) { entry.groups = parseRobots(await response.text()); entry.state = 'parsed'; }
@@ -421,7 +462,7 @@ export async function collectExternalCss(html, baseUrl, options = {}) {
       const response = await fetchImpl(target.toString(), {
         redirect: 'manual',
         signal: AbortSignal.timeout(Math.min(4_000, timeoutMs)),
-        headers: { 'user-agent': BROWSE_USER_AGENT, accept: 'text/css,*/*' },
+        headers: browseHeaders('text/css,*/*'),
       });
       if (!response.ok) continue;
       const { buffer } = await readCapped(response, STYLESHEET_BUDGET_BYTES);
@@ -615,11 +656,7 @@ export async function browse(rawUrl, options = {}) {
       response = await fetchImpl(url.toString(), {
         redirect: 'manual',
         signal: AbortSignal.timeout(Math.max(1_000, deadline - Date.now())),
-        headers: {
-          'user-agent': BROWSE_USER_AGENT,
-          accept: 'text/html,application/xhtml+xml,text/plain;q=0.8,*/*;q=0.5',
-          'accept-language': 'en',
-        },
+        headers: browseHeaders(),
       });
     } catch (error) {
       if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {

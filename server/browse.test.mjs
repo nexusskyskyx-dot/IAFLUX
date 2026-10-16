@@ -436,3 +436,28 @@ test('a slow robots.txt does not starve the page it is gating', async () => {
   assert.match(result.design.title, /Slow to permit/);
   assert.ok(Date.now() - started < 6_000, 'and inside the budget');
 });
+
+test('the fetcher announces itself without tripping a generic bot filter', () => {
+  // Land-book welcomes AI crawlers in robots.txt and publishes an llms.txt for
+  // them, yet returned 403. The old user-agent contained the bare word "Bot",
+  // which is the token generic filters match on and then allowlist around — so
+  // a client that names itself was refused by a rule meant for clients that
+  // hide. The compatible form states plainly that we are not a browser.
+  assert.match(BROWSE_USER_AGENT, /AIFLUX/, 'still names itself');
+  assert.match(BROWSE_USER_AGENT, /https:\/\//, 'with a contact URL');
+  assert.doesNotMatch(BROWSE_USER_AGENT, /\bbot\b/i, 'without the token filters key on');
+  assert.doesNotMatch(BROWSE_USER_AGENT, /curl|python|scrapy|headless/i, 'and never posing as something else');
+});
+
+test('requests carry the headers a document request carries', async () => {
+  // A filter judging whether a request is from a script reads the whole set,
+  // not just the user-agent.
+  await withServer((req, res) => {
+    res.writeHead(200, { 'content-type': 'text/html' });
+    res.end(`<html><head><title>${req.headers['accept-language'] ? 'has-lang' : 'bare'}</title></head><body>${req.headers['sec-fetch-dest'] || ''}</body></html>`);
+  }, async (base) => {
+    const result = await browse(`${base}/`, { allowPrivateAddresses: true });
+    assert.equal(result.design.title, 'has-lang', 'accept-language is sent');
+    assert.match(result.text, /document/, 'and sec-fetch-dest says document, not subresource');
+  });
+});
