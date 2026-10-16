@@ -1,6 +1,6 @@
 import catalog from '../src/data/models.json' with { type: 'json' };
 import { isNonChatModelId, isSelectableOpenRouterId, isUsableFreeCatalogModel } from '../src/lib/model-policy.mjs';
-import { buildAssistantPrompt } from './assistant-profile.mjs';
+import { buildAssistantPrompt, withTrailingGuard } from './assistant-profile.mjs';
 import { isDesignRequest } from './design-profile.mjs';
 
 // Keep this default export for callers that display the base guidance. Requests
@@ -116,7 +116,9 @@ export function buildRequest({ provider, model, messages, searchMode = 'off', se
   // arrive after the identity and the protocol, where the model is most likely
   // to treat them as material rather than instructions.
   const base = systemPrompt || buildAssistantPrompt({ provider, model, searchMode, searchPerformed, canvasFiles, design });
-  const prompt = references ? `${base}\n\n${references}` : base;
+  // ...and then the guard goes after *them*, lifted out of the profile so it is
+  // not said twice. See withTrailingGuard.
+  const prompt = references ? withTrailingGuard(base, [references]) : base;
   if (provider !== 'ollama' && !key) {
     throw new RequestError(401, `Connect your ${providerName(provider)} API key in Settings to continue.`);
   }

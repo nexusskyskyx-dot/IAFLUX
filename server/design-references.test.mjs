@@ -200,3 +200,29 @@ test('references are primed whether or not web search is also on', async () => {
   const system = JSON.parse(withRefs.options.body).messages.find((m) => m.role === 'system').content;
   assert.match(system, /DESIGN REFERENCES ALREADY RETRIEVED/);
 });
+
+test('a request where nothing could be read still gets a foundation', async () => {
+  // The references are absent, but the page still has to be written, and a
+  // sound starting palette beats none. The note stays empty: no page was
+  // opened, so there is nothing to name.
+  const entry = await primeDesignReferences('make me a landing page', {
+    browseImpl: async () => ({ ok: false, url: 'https://land-book.com/', error: 'blocked' }),
+  });
+  assert.equal(entry.note, '');
+  assert.match(entry.foundation, /A FOUNDATION TO BUILD ON/);
+  assert.match(entry.foundation, /starting palette rather than a borrowed one/);
+});
+
+test('the foundation is built from the featured sites, not the gallery', async () => {
+  const gallery = galleryResult('https://land-book.com/design/landing-page', [
+    { name: 'Zaro', url: 'https://zaro.ai/', external: true },
+  ]);
+  const entry = await primeDesignReferences('make me a landing page', {
+    browseImpl: async (url) => (url === 'https://zaro.ai/'
+      ? { ok: true, finalUrl: url, design: { title: 'Zaro', fonts: ['Space Grotesk', 'Inter'], colors: ['#0b0b0f', '#ff5a1f'] }, references: [], text: '' }
+      : gallery),
+  });
+  assert.match(entry.foundation, /--accent: #ff5a1f/, 'the featured site\'s accent');
+  assert.match(entry.foundation, /--display: "Space Grotesk"/, 'and its type');
+  assert.match(entry.foundation, /read from the pages above/);
+});

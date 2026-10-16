@@ -209,10 +209,14 @@ app.post('/api/chat', rateLimit, async (req, res) => {
       }
     }
 
+    // The foundation is CSS to copy, not a page that was opened, so it rides
+    // along with the references while staying separate from them.
+    const primedNote = [primed?.note, primed?.foundation].filter(Boolean).join('\n\n');
+
     // Check the model connection before making any search calls.
-    let { url, options, format } = buildRequest({ ...input, references: primed?.note || '' }, key, ollamaBaseUrl);
-    input.references = primed?.note || '';
-    if (input.searchMode !== 'off') input.references = primed?.note || '';
+    let { url, options, format } = buildRequest({ ...input, references: primedNote }, key, ollamaBaseUrl);
+    input.references = primedNote;
+    if (input.searchMode !== 'off') input.references = primedNote;
     if (input.searchMode !== 'off') {
       startStream(res, input.model);
       stopKeepAlive = startKeepAlive(res);
@@ -222,7 +226,7 @@ app.post('/api/chat', rateLimit, async (req, res) => {
         sendEvent(res, { type: 'search', phase: 'searching', query });
         const sources = await searchWeb(query, suppliedSearchKey || envSearchKey, { signal: controller.signal });
         sendEvent(res, { type: 'sources', query, sources });
-        ({ url, options, format } = buildRequest({ ...withSearchContext(input, query, sources), references: primed?.note || '' }, key, ollamaBaseUrl));
+        ({ url, options, format } = buildRequest({ ...withSearchContext(input, query, sources), references: primedNote }, key, ollamaBaseUrl));
       } else {
         // The already-built answer request has the full AIFLUX profile plus
         // a mode-specific warning that no live search was performed.
