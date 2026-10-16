@@ -97,7 +97,41 @@ test('the canvas marks the files the assistant changed and can show the diff', a
     const html = renderToStaticMarkup(React.createElement(Canvas, props));
     assert.match(html, /file-change-badge/, 'the changed file is badged in the file list');
     assert.match(html, /\+2/);
+    // Added and removed counts must carry their own colours: a single coloured
+    // badge paints deletions green along with additions.
+    assert.match(html, /class="diff-added">\+2</, 'the added count is coloured as an addition');
     assert.match(html, /Show what the assistant changed/, 'a diff toggle is offered for that file');
     assert.equal((html.match(/file-change-badge/g) || []).length, 1, 'only the file the assistant changed is badged');
+  } finally { await vite.close(); }
+});
+
+test('canvas badges colour deletions red, not green', async () => {
+  const vite = await createServer({ configFile: false, appType: 'custom', optimizeDeps: { noDiscovery: true, include: [] }, server: { middlewareMode: true } });
+  try {
+    const { default: Canvas } = await vite.ssrLoadModule('/src/components/Canvas.tsx');
+    const render = (fileOps) => renderToStaticMarkup(React.createElement(Canvas, {
+      conversation: {
+        id: 'c', title: 'Canvas', createdAt: 1, updatedAt: 1, selectedFileId: 'f1',
+        files: [{ id: 'f1', name: 'app.js', content: 'const a = 1;', origin: 'generated' }],
+        messages: [{ id: '1', role: 'assistant', content: 'Done.', status: 'done', createdAt: 1, fileOps }],
+      },
+      mobileOpen: false, onClose() {}, onSelectFile() {}, onUpdateFile() {},
+      onCreateFile() {}, onDeleteFile() {}, onAddContext() {}, onNotify() {},
+    }));
+    const badge = (html) => html.slice(html.indexOf('file-change-badge'), html.indexOf('file-change-badge') + 220);
+
+    const edits = badge(render([{ path: 'app.js', action: 'patch', status: 'applied', added: 3, removed: 7, diff: [] }]));
+    assert.match(edits, /class="diff-added">\+3</);
+    assert.match(edits, /class="diff-removed">\u22127</);
+    assert.ok(edits.indexOf('diff-added') < edits.indexOf('diff-removed'), 'additions come first');
+
+    // A pure deletion must not fall back to the green addition colour.
+    const deleted = badge(render([{ path: 'app.js', action: 'delete', status: 'applied', added: 0, removed: 4, diff: [] }]));
+    assert.match(deleted, /class="diff-removed">\u22124</);
+    assert.doesNotMatch(deleted, /diff-added/, 'nothing green when nothing was added');
+
+    const added = badge(render([{ path: 'app.js', action: 'write', status: 'applied', added: 5, removed: 0, diff: [] }]));
+    assert.match(added, /class="diff-added">\+5</);
+    assert.doesNotMatch(added, /diff-removed/, 'no empty removal count');
   } finally { await vite.close(); }
 });

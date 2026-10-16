@@ -291,7 +291,9 @@ a { color: inherit; }
 .diff-added { color: #9fe870; }
 .diff-removed { color: #ff8b8b; }
 
-.file-change-badge { flex: none; padding: 1px 4px; border-radius: 4px; background: #2b2231; color: #9fe870; font-family: 'JetBrains Mono', monospace; font-size: 9px; }
+/* Neutral on purpose: the counts inside carry their own added/removed colour,
+   so forcing a colour here would paint deletions green. */
+.file-change-badge { flex: none; display: inline-flex; gap: 4px; padding: 1px 4px; border-radius: 4px; background: #2b2231; color: var(--muted); font-family: 'JetBrains Mono', monospace; font-size: 9px; }
 .canvas-tab-actions .diff-toggle-active { color: var(--accent); border-color: var(--accent); }
 
 .file-diff { display: flex; flex-direction: column; height: 100%; overflow: auto; }
