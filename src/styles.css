@@ -487,3 +487,20 @@ a { color: inherit; }
 .browse-chip-state { color: var(--muted); max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .browse-chip.failed { border-color: #ff8b8b55; }
 .browse-chip.failed .browse-chip-state { color: #ff8b8b; }
+
+/* Full preview: the page over the whole workspace, at the width it was made for. */
+.full-preview { position: fixed; inset: 0; z-index: 90; display: flex; flex-direction: column; background: #0d0a10; }
+.full-preview-bar { flex: none; display: flex; align-items: center; gap: 14px; height: 46px; padding: 0 12px; border-bottom: 1px solid #2b2231; background: #171220; }
+.full-preview-title { display: inline-flex; align-items: center; gap: 7px; color: #c9aee9; font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; }
+.full-preview-devices { display: flex; gap: 4px; margin: 0 auto; padding: 3px; border-radius: 9px; background: #221a29; }
+.full-preview-devices button { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; border: 0; border-radius: 7px; background: transparent; color: #a197a9; font-size: 11px; font-family: 'JetBrains Mono', monospace; cursor: pointer; }
+.full-preview-devices button:hover { color: #e8d9ff; }
+.full-preview-devices button.active { background: #3a2b48; color: #e8d9ff; }
+.full-preview-actions { display: flex; gap: 4px; }
+.full-preview-actions button { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border: 1px solid #34283d; border-radius: 8px; background: #221a29; color: #c9aee9; cursor: pointer; }
+.full-preview-actions button:hover { background: #3a2b48; color: #fff; border-color: var(--accent); }
+.full-preview-stage { flex: 1; display: flex; justify-content: center; min-height: 0; padding: 14px; background: #0d0a10; }
+.full-preview-frame { display: flex; width: 100%; max-width: 100%; height: 100%; }
+.full-preview-frame iframe { display: block; width: 100%; height: 100%; border: 0; border-radius: 8px; background: #fff; box-shadow: 0 18px 50px #0008; }
+.full-preview-foot { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 14px; border-top: 1px solid #2b2231; background: #171220; color: #897a94; font-size: 10px; }
+@media (max-width: 720px) { .full-preview-devices { margin: 0; } .full-preview-title span, .full-preview-devices button { font-size: 10px; } .full-preview-foot span:last-child { display: none; } }
