@@ -32,7 +32,7 @@ export function validateChat(body, ollamaConfigured = false) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     throw new RequestError(400, 'Invalid request.');
   }
-  const { provider, model, messages, searchMode = 'off' } = body;
+  const { provider, model, messages, searchMode = 'off', canvas } = body;
   if (!['off', 'auto', 'always'].includes(searchMode)) {
     throw new RequestError(400, 'Choose a valid web search mode.');
   }
@@ -77,11 +77,21 @@ export function validateChat(body, ollamaConfigured = false) {
   if (totalLength > 180_000 || cleanMessages.at(-1).role !== 'user') {
     throw new RequestError(400, 'Conversation is too long or does not end with a user message. Start a new chat or shorten the context.');
   }
-  return { provider, model, messages: cleanMessages, searchMode };
+  // A compact manifest of what is on the Canvas: names and sizes only, never
+  // contents. It tells the model which files it may patch with SEARCH/REPLACE
+  // instead of rewriting from scratch.
+  const canvasFiles = Array.isArray(canvas)
+    ? canvas.slice(0, 60).map((entry) => {
+        const name = typeof entry?.name === 'string' ? entry.name.replace(/[^\w./-]/g, '').slice(0, 100) : '';
+        const lines = Number.isFinite(entry?.lines) ? Math.max(0, Math.trunc(entry.lines)) : 0;
+        return name ? `${name} — ${lines} ${lines === 1 ? 'line' : 'lines'}` : null;
+      }).filter(Boolean)
+    : [];
+  return { provider, model, messages: cleanMessages, searchMode, canvasFiles };
 }
 
-export function buildRequest({ provider, model, messages, searchMode = 'off', searchPerformed = false, systemPrompt }, key, ollamaBaseUrl) {
-  const prompt = systemPrompt || buildAssistantPrompt({ provider, model, searchMode, searchPerformed });
+export function buildRequest({ provider, model, messages, searchMode = 'off', searchPerformed = false, systemPrompt, canvasFiles = [] }, key, ollamaBaseUrl) {
+  const prompt = systemPrompt || buildAssistantPrompt({ provider, model, searchMode, searchPerformed, canvasFiles });
   if (provider !== 'ollama' && !key) {
     throw new RequestError(401, `Connect your ${providerName(provider)} API key in Settings to continue.`);
   }

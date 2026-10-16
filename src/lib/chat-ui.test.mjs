@@ -26,6 +26,11 @@ test('chat displays the search mode, trusted source links, and honest skipped-se
         { id: '5', role: 'assistant', content: 'Half of a long file…', status: 'streaming', createdAt: 5, continuation: 2 },
         // Ran out of attempts at the request limit.
         { id: '6', role: 'assistant', content: 'The rest is still missing.', status: 'done', createdAt: 6, truncated: true },
+        // Wrote one file, failed to patch another.
+        { id: '7', role: 'assistant', content: 'Done — two files touched.', status: 'done', createdAt: 7, fileOps: [
+          { path: 'index.html', action: 'write', status: 'applied', added: 12, removed: 4, diff: [] },
+          { path: 'app.js', action: 'patch', status: 'failed', added: 0, removed: 0, diff: [], error: 'Could not find the lines to change in app.js.' },
+        ] },
       ],
     };
     const props = {
@@ -46,6 +51,13 @@ test('chat displays the search mode, trusted source links, and honest skipped-se
     assert.match(html, /Picking the answer back up \(3 of 5\)/, 'a resumed answer says so instead of looking stuck');
     assert.match(html, /everything written so far is kept/);
     assert.match(html, /reached the time limit before the model finished/, 'a cut-short answer is not passed off as finished');
+    // Files land on the canvas, so the chat shows a chip instead of the code.
+    assert.match(html, /file-op-chip applied/);
+    assert.match(html, /file-op-chip failed/);
+    assert.match(html, /index\.html/);
+    assert.match(html, /\+12/);
+    assert.match(html, /\u22124/, 'the removed-line count is shown');
+    assert.match(html, /Could not find the lines to change in app\.js\./, 'a failed write explains itself');
   } finally { await vite.close(); }
 });
 
@@ -61,5 +73,31 @@ test('settings explain optional keyless Tavily search and offer a private key fi
     assert.match(html, /Optional Tavily API key/);
     assert.match(html, /type="password"[^>]*aria-label="Tavily search API key"/);
     assert.match(html, /query goes to Tavily/);
+  } finally { await vite.close(); }
+});
+
+test('the canvas marks the files the assistant changed and can show the diff', async () => {
+  const vite = await createServer({ configFile: false, appType: 'custom', optimizeDeps: { noDiscovery: true, include: [] }, server: { middlewareMode: true } });
+  try {
+    const { default: Canvas } = await vite.ssrLoadModule('/src/components/Canvas.tsx');
+    const conversation = {
+      id: 'c', title: 'Canvas', createdAt: 1, updatedAt: 1, selectedFileId: 'f1',
+      files: [
+        { id: 'f1', name: 'index.html', content: '<h1>Hi</h1>', origin: 'generated' },
+        { id: 'f2', name: 'app.js', content: 'const a = 1;', origin: 'user' },
+      ],
+      messages: [{ id: '1', role: 'assistant', content: 'Wrote it.', status: 'done', createdAt: 1, fileOps: [
+        { path: 'index.html', action: 'write', status: 'applied', added: 2, removed: 0, diff: [{ kind: 'add', text: '<h1>Hi</h1>', after: 1 }] },
+      ] }],
+    };
+    const props = {
+      conversation, mobileOpen: false, onClose() {}, onSelectFile() {}, onUpdateFile() {},
+      onCreateFile() {}, onDeleteFile() {}, onAddContext() {}, onNotify() {},
+    };
+    const html = renderToStaticMarkup(React.createElement(Canvas, props));
+    assert.match(html, /file-change-badge/, 'the changed file is badged in the file list');
+    assert.match(html, /\+2/);
+    assert.match(html, /Show what the assistant changed/, 'a diff toggle is offered for that file');
+    assert.equal((html.match(/file-change-badge/g) || []).length, 1, 'only the file the assistant changed is badged');
   } finally { await vite.close(); }
 });

@@ -8,6 +8,7 @@ import {
   getFreeXkiroModels, getXkiroFreeCatalog, xkiroCatalogIsFresh,
 } from './providers.mjs';
 import { planWebSearch, searchWeb, withSearchContext } from './search.mjs';
+import { createFileOpParser } from './file-ops.mjs';
 
 const app = express();
 const ollamaBaseUrl = process.env.OLLAMA_BASE_URL?.trim() || '';
@@ -209,6 +210,13 @@ app.post('/api/chat', rateLimit, async (req, res) => {
     stopKeepAlive ??= startKeepAlive(res);
     let usedModel = input.model;
     let hasText = false;
+    // Prose reaches the chat as usual; tagged file writes are lifted out of the
+    // stream and sent as `file` events so the canvas, not the transcript, holds
+    // the code.
+    const parser = createFileOpParser({
+      onText: (text) => sendEvent(res, { type: 'delta', text }),
+      onOp: (op) => sendEvent(res, { type: 'file', ...op }),
+    });
     const chunks = format === 'ollama' ? readLines(upstream.body) : readSSE(upstream.body);
     for await (const data of chunks) {
       if (controller.signal.aborted) break;
@@ -231,10 +239,11 @@ app.post('/api/chat', rateLimit, async (req, res) => {
       if (part.text) {
         if (!hasText && stopKeepAlive) { stopKeepAlive(); stopKeepAlive = null; }
         hasText = true;
-        sendEvent(res, { type: 'delta', text: part.text });
+        parser.push(part.text);
       }
       if (part.done) break;
     }
+    parser.end();
     if (!controller.signal.aborted) {
       if (!hasText) sendEvent(res, { type: 'error', message: 'The model returned no text. Try another model or rephrase your request.' });
       else sendEvent(res, { type: 'done', model: usedModel });

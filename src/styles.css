@@ -277,6 +277,38 @@ a { color: inherit; }
 .message-continuation { display: flex; align-items: center; gap: 8px; margin-top: 10px; padding: 7px 10px; border: 1px solid #544164; border-radius: 8px; background: #221729; color: #b69cdf; font-size: 10px; }
 .message-continuation svg { flex: none; color: var(--accent); animation: rotation 1s linear infinite; }
 @keyframes rotation { to { transform: rotate(360deg); } }
+
+/* Files the assistant wrote straight to the canvas. */
+.message-file-ops { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 11px; }
+.file-op-chip { display: flex; align-items: center; gap: 6px; padding: 5px 8px; border: 1px solid #544164; border-radius: 7px; background: #221729; color: #cbb3e8; font-size: 10px; transition: border-color .15s, color .15s; }
+.file-op-chip:hover { border-color: var(--accent); color: var(--accent-bright); }
+.file-op-chip svg { flex: none; }
+.file-op-chip .file-op-name { max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: 'JetBrains Mono', monospace; }
+.file-op-chip.failed { border-color: #7a4a4a; background: #2a1a1c; color: #e6a8a8; }
+.file-op-chip.failed:hover { border-color: #c07a7a; color: #f0bcbc; }
+.file-op-failed { color: #e08b8b; }
+.file-op-stat { display: inline-flex; gap: 5px; font-family: 'JetBrains Mono', monospace; color: #8d7f99; }
+.diff-added { color: #9fe870; }
+.diff-removed { color: #ff8b8b; }
+
+.file-change-badge { flex: none; padding: 1px 4px; border-radius: 4px; background: #2b2231; color: #9fe870; font-family: 'JetBrains Mono', monospace; font-size: 9px; }
+.canvas-tab-actions .diff-toggle-active { color: var(--accent); border-color: var(--accent); }
+
+.file-diff { display: flex; flex-direction: column; height: 100%; overflow: auto; }
+.file-diff-summary { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--line-subtle); color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
+.file-diff-summary .diff-added, .file-diff-summary .diff-removed { font-family: 'JetBrains Mono', monospace; font-size: 11px; text-transform: none; letter-spacing: 0; }
+.file-diff-body { flex: 1; overflow: auto; font: 11px/1.65 'JetBrains Mono', monospace; }
+.diff-line { display: flex; align-items: baseline; white-space: pre; }
+.diff-no { flex: none; width: 34px; padding-right: 8px; color: #5d5166; text-align: right; user-select: none; }
+.diff-marker { flex: none; width: 16px; text-align: center; color: #5d5166; user-select: none; }
+.diff-text { flex: 1; padding-right: 12px; white-space: pre-wrap; overflow-wrap: anywhere; color: #d3c6e1; }
+.diff-add { background: #9fe87012; }
+.diff-add .diff-marker, .diff-add .diff-text { color: #b7ee8f; }
+.diff-remove { background: #ff8b8b12; }
+.diff-remove .diff-marker, .diff-remove .diff-text { color: #ffa8a8; }
+.diff-skip { background: #1a151d; }
+.diff-skip .diff-text { color: var(--dim); font-style: italic; }
+.file-diff-empty { padding: 20px; color: var(--muted); font-size: 11px; }
 .thinking-line { display: flex; align-items: center; gap: 11px; color: #ad9fbb; font-size: 11px; padding: 9px 0; }
 .message-search-progress { display: flex; align-items: center; gap: 8px; margin: 7px 0; color: #b69cdf; font-size: 11px; overflow-wrap: anywhere; }
 .message-search-progress svg { flex: none; color: var(--accent); animation: pulse 1.5s ease-in-out infinite; }

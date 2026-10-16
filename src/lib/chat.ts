@@ -6,6 +6,16 @@ export type StreamEvent =
   | { type: 'search'; phase: 'planning' | 'searching' | 'skipped'; query?: string }
   | { type: 'sources'; query: string; sources: WebSource[] }
   | { type: 'truncated'; reason: string }
+  | {
+      type: 'file';
+      action: 'write' | 'patch' | 'delete';
+      path: string;
+      status: 'done' | 'incomplete';
+      content?: string;
+      hunks?: { search: string; replace: string }[];
+      /** The raw tagged block, used to resume a write the time limit cut short. */
+      raw?: string;
+    }
   | { type: 'error'; message: string };
 
 /**
@@ -20,6 +30,8 @@ export async function requestChat(input: {
   key: string;
   searchKey: string;
   searchMode: SearchMode;
+  /** Canvas manifest: names and line counts, so the model patches what exists. */
+  canvas?: { name: string; lines: number }[];
   accessCode: string;
   signal: AbortSignal;
   onEvent: (event: StreamEvent) => void;
@@ -32,7 +44,7 @@ export async function requestChat(input: {
       ...(input.searchMode !== 'off' && input.searchKey ? { 'x-aiflux-search-key': input.searchKey } : {}),
       ...(input.accessCode ? { 'x-aiflux-access-code': input.accessCode } : {}),
     },
-    body: JSON.stringify({ provider: input.provider, model: input.model, messages: input.messages, searchMode: input.searchMode }),
+    body: JSON.stringify({ provider: input.provider, model: input.model, messages: input.messages, searchMode: input.searchMode, canvas: input.canvas }),
     signal: input.signal,
   });
   if (!response.ok) {

@@ -30,13 +30,25 @@ test('the central capability profile covers shipped features and keeps identity 
   assert.match(prompt, /^You are AIFLUX,/);
   assert.match(prompt, /user selected the Gemini model gemini-2\.5-flash for this reply/);
   for (const feature of AIFLUX_FEATURES) assert.ok(prompt.includes(`- ${feature}`), `Feature missing from prompt: ${feature}`);
-  assert.match(prompt, /Canvas turns named fenced code blocks into files/);
+  assert.match(prompt, /Canvas is the code surface/);
   assert.match(prompt, /HTML or SVG projects in a sandbox/);
   assert.match(prompt, /attach text\/code files/);
   assert.match(prompt, /local browser conversations/);
-  assert.match(prompt, /cannot directly edit an existing Canvas file/);
   assert.match(prompt, /cannot.*run commands or tests, deploy code/);
-  assert.match(prompt, /```html filename="index\.html"/);
+  // The write protocol has to be spelled out, or code never reaches the canvas.
+  assert.match(prompt, /<aiflux-write path="index\.html">/);
+  assert.match(prompt, /<aiflux-patch path="index\.html">/);
+  assert.match(prompt, /<<<<<<< SEARCH/);
+  assert.match(prompt, /<aiflux-delete path="old\.html" \/>/);
+  // The model is told what is already there so it patches instead of rewriting.
+  assert.match(prompt, /Files on the Canvas right now:/);
+});
+
+test('the canvas manifest reaches the prompt so the model patches rather than rewrites', () => {
+  const prompt = buildAssistantPrompt({ provider: 'gemini', model: models.gemini, canvasFiles: ['index.html — 42 lines', 'app.js — 7 lines'] });
+  assert.match(prompt, /- index\.html — 42 lines/);
+  assert.match(prompt, /- app\.js — 7 lines/);
+  assert.match(buildAssistantPrompt({ provider: 'groq', model: models.groq }), /\(none yet\)/, 'an empty canvas says so');
 });
 
 test('every provider includes the AIFLUX profile as a high-priority instruction on every turn', () => {

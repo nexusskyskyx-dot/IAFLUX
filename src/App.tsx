@@ -8,6 +8,7 @@ import { newId } from './lib/id.ts';
 import { isUsableFreeCatalogModel } from './lib/model-policy.mjs';
 import { requestChat } from './lib/chat';
 import { MAX_CONTINUATIONS, continuationInstruction, stripOverlap } from './lib/continuation';
+import { applyFileOp, stripFileBlocks, tidyProse } from './lib/file-ops';
 import { Brand } from './components/Brand';
 import Sidebar from './components/Sidebar';
 import ChatPanel from './components/ChatPanel';
@@ -39,6 +40,8 @@ export default function App() {
   const [contextFile, setContextFile] = useState<AttachedFile | null>(null);
   const [canvasVisible, setCanvasVisible] = useState(true);
   const [mobileCanvasOpen, setMobileCanvasOpen] = useState(false);
+  // Bumped when a chat chip asks the canvas to reveal a file's diff.
+  const [revealDiff, setRevealDiff] = useState<{ path: string; nonce: number } | null>(null);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [toast, setToast] = useState('');
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -224,14 +227,39 @@ export default function App() {
       ...activeChat, title: activeChat.messages.length === 0 ? text.replace(/\s+/g, ' ').slice(0, 53) + (text.length > 53 ? '…' : '') : activeChat.title,
       updatedAt: now, messages: [...activeChat.messages, userMessage, assistantMessage],
     };
+    // Tell the model what is already on the Canvas so it patches a file rather
+    // than rewriting it blind. Names and sizes only — contents stay private
+    // until the user attaches a file to the message.
+    const canvasManifest = updated.files.map((file) => ({ name: file.name, lines: file.content.split('\n').length }));
     if (activeId) setChats((previous) => previous.map((chat) => chat.id === chatId ? updated : chat));
     else { setChats((previous) => [updated, ...previous]); setActiveId(chatId); }
     setSending(true);
     const controller = new AbortController();
     abortRef.current = { controller, chatId };
     let responseText = '';
+    // Everything the model emitted, tags included. Resuming needs the raw
+    // stream: a continuation has to carry on inside a half-written block.
+    let rawText = '';
     let actualModel = selectedModel.name;
     let endedShort = false;
+
+    // Writes straight to the canvas. Applied inside the state updater so it
+    // always sees the current file list, even if the user edits mid-stream.
+    const applyOp = (op: Parameters<typeof applyFileOp>[1]) => {
+      setChats((previous) => previous.map((chat) => {
+        if (chat.id !== chatId) return chat;
+        const { files, result } = applyFileOp(chat.files, op);
+        return {
+          ...chat,
+          updatedAt: Date.now(),
+          files,
+          selectedFileId: result.status === 'applied' && result.action !== 'delete' ? result.fileId || chat.selectedFileId : chat.selectedFileId,
+          messages: chat.messages.map((message) => message.id === assistantId
+            ? { ...message, fileOps: [...(message.fileOps || []), result] }
+            : message),
+        };
+      }));
+    };
 
     // One request may run out of time while the model is still writing. Rather
     // than showing a half-finished answer, send the partial text back and ask
@@ -240,8 +268,8 @@ export default function App() {
       for (let attempt = 0; ; attempt += 1) {
         const messages = attempt === 0
           ? history
-          : [...history, { role: 'user' as const, content: continuationInstruction(responseText) }];
-        const beforeHop = responseText;
+          : [...history, { role: 'user' as const, content: continuationInstruction(rawText) }];
+        const beforeHop = rawText;
         let hopText = '';
         let truncated = false;
         try {
@@ -252,6 +280,7 @@ export default function App() {
             key: selectedModel.provider !== 'ollama' ? credentials.keys[selectedModel.provider] : '',
             searchKey: credentials.searchKey,
             searchMode: attempt === 0 ? searchMode : 'off',
+            canvas: canvasManifest,
             accessCode: credentials.accessCode,
             signal: controller.signal,
             onEvent: (event) => {
@@ -268,8 +297,17 @@ export default function App() {
               }
               if (event.type === 'delta') {
                 hopText += event.text;
+                rawText += event.text;
                 responseText += event.text;
                 patchMessage(chatId, assistantId, (message) => ({ ...message, content: message.content + event.text }));
+              }
+              if (event.type === 'file') {
+                // Keep the raw block for resuming, then hand the operation to
+                // the canvas. An incomplete block is never applied: the model
+                // will finish it on the next attempt.
+                hopText += event.raw || '';
+                rawText += event.raw || '';
+                if (event.status !== 'incomplete') applyOp(event);
               }
               if (event.type === 'model' && event.model) {
                 actualModel = event.model.split('/').at(-1)?.replace(':free', '') || event.model;
@@ -301,24 +339,37 @@ export default function App() {
     const trimOverlap = (before: string, hop: string): void => {
       const kept = stripOverlap(before, hop);
       if (kept === hop) return;
-      responseText = responseText.slice(0, responseText.length - (hop.length - kept.length));
+      rawText = rawText.slice(0, rawText.length - (hop.length - kept.length));
+      responseText = tidyProse(stripFileBlocks(rawText));
       patchMessage(chatId, assistantId, (message) => ({ ...message, content: responseText }));
     };
 
     void runTurn().then(() => {
-      const text = responseText;
-      const count = extractCodeFiles(text, updated.files).length;
+      const text = tidyProse(responseText);
+      // `summary` is assigned rather than accumulated inside the updater so it
+      // stays correct even though React may run the updater more than once.
+      let summary = '';
       setChats((previous) => previous.map((chat) => {
         if (chat.id !== chatId) return chat;
-        const generated = extractCodeFiles(text, chat.files);
+        const ops = chat.messages.find((message) => message.id === assistantId)?.fileOps || [];
+        const applied = ops.filter((op) => op.status === 'applied');
+        const failed = ops.filter((op) => op.status === 'failed');
+        // Only scrape fenced blocks when the model ignored the write protocol,
+        // so a file is never created twice from the same answer.
+        const generated = ops.length ? [] : extractCodeFiles(text, chat.files);
         const files = mergeGeneratedFiles(chat.files, generated);
+        if (failed.length) summary = `${failed[0].error}`;
+        else if (applied.length) {
+          const changed = applied.filter((op) => op.action !== 'delete');
+          summary = `${changed.length} ${changed.length === 1 ? 'file' : 'files'} written to Canvas`;
+        } else if (generated.length) summary = `${generated.length} ${generated.length === 1 ? 'file' : 'files'} added to Canvas`;
         return {
           ...chat, updatedAt: Date.now(), files,
           selectedFileId: generated[0]?.id || chat.selectedFileId,
           messages: chat.messages.map((message) => message.id === assistantId ? { ...message, content: text, status: 'done', model: actualModel, truncated: endedShort, continuation: undefined, searchStatus: undefined, searchQuery: undefined } : message),
         };
       }));
-      if (count) notify(`${count} ${count === 1 ? 'file' : 'files'} added to Canvas`);
+      if (summary) notify(summary);
     }).catch((error: unknown) => {
       const aborted = controller.signal.aborted;
       const message = error instanceof Error ? error.message : 'Something went wrong.';
@@ -333,6 +384,10 @@ export default function App() {
   };
 
   const selectFile = (id: string) => updateActive((chat) => ({ ...chat, selectedFileId: id }));
+  const openFileDiff = (path: string) => {
+    setMobileCanvasOpen(true);
+    setRevealDiff({ path, nonce: Date.now() });
+  };
   const updateFile = (id: string, content: string) => updateActive((chat) => ({ ...chat, updatedAt: Date.now(), files: chat.files.map((file) => file.id === id ? { ...file, content, origin: 'user' } : file) }));
   const createFile = (name: string, content = '') => {
     const file: WorkspaceFile = { id: newId(), name, content, origin: 'user' };
@@ -383,10 +438,10 @@ export default function App() {
         searchMode={searchMode} onCycleSearchMode={cycleSearchMode} isConnected={isConnected} onSend={sendMessage}
         onStop={stop} onSelectModel={chooseModel} onLoadModels={() => void loadModels()}
         onLibrary={() => changeView('library')} onOpenSnippet={openSnippet} onClearContext={() => setContextFile(null)}
-        onNotify={notify} onSettings={() => openSettings()} />
+        onNotify={notify} onSettings={() => openSettings()} onOpenFileDiff={openFileDiff} />
         : <ModelLibrary models={models} selected={selectedModel} catalogAvailable={liveCatalogsAvailable} isConnected={isConnected} onSelect={chooseModel} onSettings={openSettings} onRefresh={() => void loadModels(true)} />}
     </main>
-    {(canvasVisible || mobileCanvasOpen) && <Canvas conversation={activeChat} mobileOpen={mobileCanvasOpen} onClose={closeCanvas} onSelectFile={selectFile} onUpdateFile={updateFile} onCreateFile={createFile} onDeleteFile={deleteFile} onAddContext={addContext} onNotify={notify} />}
+    {(canvasVisible || mobileCanvasOpen) && <Canvas conversation={activeChat} mobileOpen={mobileCanvasOpen} onClose={closeCanvas} onSelectFile={selectFile} onUpdateFile={updateFile} onCreateFile={createFile} onDeleteFile={deleteFile} onAddContext={addContext} onNotify={notify} revealDiff={revealDiff} />}
     {mobileCanvasOpen && <button className="canvas-mobile-scrim" aria-label="Close Canvas" onClick={() => setMobileCanvasOpen(false)} />}
     {settingsOpen && <SettingsModal credentials={credentials} config={config} focusProvider={settingsProvider} onSave={saveSettings} onClose={() => setSettingsOpen(false)} />}
     {toast && <div className="toast" role="status"><span><Check size={15} /></span>{toast}</div>}

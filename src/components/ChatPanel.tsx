@@ -28,6 +28,7 @@ interface Props {
   onClearContext: () => void;
   onNotify: (message: string) => void;
   onSettings: () => void;
+  onOpenFileDiff: (path: string) => void;
 }
 
 const suggestions = [
@@ -58,6 +59,22 @@ function MessageBody({ message, onOpenSnippet, onNotify }: { message: ChatMessag
     code: ({ children, className }) => <code className={className || 'inline-code'}>{children}</code>,
     a: ({ children, href }) => <a href={href} target="_blank" rel="noopener noreferrer">{children}<ArrowUpRight size={12} /></a>,
   }}>{message.content}</ReactMarkdown></div>;
+}
+
+function FileOpChips({ message, onOpen, onNotify }: { message: ChatMessage; onOpen: (path: string) => void; onNotify: (message: string) => void }) {
+  if (!message.fileOps?.length) return null;
+  return <div className="message-file-ops">{message.fileOps.map((op, index) => <button
+    className={`file-op-chip ${op.status}`} key={`${op.path}-${index}`}
+    title={op.status === 'failed' ? op.error : `${op.action === 'delete' ? 'Deleted' : 'Wrote'} ${op.path} — open the diff`}
+    onClick={() => { if (op.status === 'failed') onNotify(op.error || 'That change could not be applied.'); else onOpen(op.path); }}
+  >
+    <FileCode2 size={13} />
+    <span className="file-op-name">{op.path.split('/').at(-1)}</span>
+    {op.status === 'failed' ? <span className="file-op-failed">failed</span>
+      : op.action === 'delete' ? <span className="file-op-stat">deleted</span>
+      : <span className="file-op-stat"><span className="diff-added">+{op.added}</span> <span className="diff-removed">−{op.removed}</span></span>}
+    <ArrowUpRight size={12} />
+  </button>)}</div>;
 }
 
 function ContinuationNotice({ attempt }: { attempt: number }) {
@@ -154,6 +171,7 @@ export default function ChatPanel(props: Props) {
         <div className="message-main"><div className="message-byline"><strong>{message.role === 'assistant' ? 'AIFLUX' : 'You'}</strong><span>{message.role === 'assistant' ? message.model ? message.model.split('/').at(-1)?.replace(':free', '') : 'Coding partner' : new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>
           {message.role === 'assistant' && <SearchSources message={message} />}
           {message.role === 'assistant' && !message.content && message.status === 'streaming' ? <div className="thinking-line"><span className="thinking-dots"><i /><i /><i /></span> {message.searchStatus ? 'Checking live sources...' : 'Putting thoughts into motion...'}</div> : message.content ? <MessageBody message={message} onOpenSnippet={props.onOpenSnippet} onNotify={props.onNotify} /> : null}
+          {message.role === 'assistant' && message.fileOps?.length ? <FileOpChips message={message} onOpen={props.onOpenFileDiff} onNotify={props.onNotify} /> : null}
           {message.role === 'assistant' && message.continuation && message.status === 'streaming' ? <ContinuationNotice attempt={message.continuation} /> : null}
           {message.attachments?.length ? <div className="message-attachments">{message.attachments.map((file, index) => <span key={`${file.name}-${index}`}><FileCode2 size={13} />{file.name}</span>)}</div> : null}
           {message.status === 'error' && <div className="message-interrupted">Response interrupted. You can try sending your message again.</div>}

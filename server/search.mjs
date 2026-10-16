@@ -182,6 +182,6 @@ export function withSearchContext(input, query, sources, now = new Date()) {
   } : message);
   return {
     ...input, messages, searchPerformed: true,
-    systemPrompt: buildAssistantPrompt({ provider: input.provider, model: input.model, searchMode: input.searchMode, searchPerformed: true }),
+    systemPrompt: buildAssistantPrompt({ provider: input.provider, model: input.model, searchMode: input.searchMode, searchPerformed: true, canvasFiles: input.canvasFiles }),
   };
 }

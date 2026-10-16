@@ -1,3 +1,5 @@
+import type { DiffLine } from './lib/diff';
+
 export type Provider = 'openrouter' | 'gemini' | 'groq' | 'ollama' | 'xkiro';
 export type SearchMode = 'off' | 'auto' | 'always';
 
@@ -35,11 +37,34 @@ export interface ChatMessage {
   continuation?: number;
   /** Ended at the request limit rather than because the model was finished. */
   truncated?: boolean;
+  /** Files the assistant wrote straight to the canvas during this answer. */
+  fileOps?: FileOpResult[];
   attachments?: AttachedFile[];
   search?: { query: string; sources: WebSource[] };
   searchSkipped?: boolean;
   searchStatus?: 'planning' | 'searching';
   searchQuery?: string;
+}
+
+/** A file operation the assistant emitted. */
+export interface FileOp {
+  action: 'write' | 'patch' | 'delete';
+  path: string;
+  /** Full new contents, for `write`. */
+  content?: string;
+  /** SEARCH/REPLACE pairs, for `patch`. */
+  hunks?: { search: string; replace: string }[];
+}
+
+export interface FileOpResult {
+  path: string;
+  action: FileOp['action'];
+  status: 'applied' | 'failed';
+  added: number;
+  removed: number;
+  diff: DiffLine[];
+  fileId?: string;
+  error?: string;
 }
 
 export interface WorkspaceFile {
