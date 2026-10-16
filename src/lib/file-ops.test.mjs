@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applyFileOp, stripFileBlocks } from './file-ops.ts';
+import { applyFileOp, opResultsForFiles, stripFileBlocks } from './file-ops.ts';
 
 const file = (name, content, origin = 'generated') => ({ id: `id-${name}`, name, content, origin });
 
@@ -121,4 +121,38 @@ test('stripFileBlocks drops a block the stream left open', () => {
 test('stripFileBlocks leaves ordinary text alone', () => {
   const prose = 'Compare a < b and use <div> in HTML. Nothing to strip.';
   assert.equal(stripFileBlocks(prose), prose);
+});
+
+test('a named fenced block leaves the transcript once it becomes a file', async () => {
+  const { stripNamedCodeBlocks } = await import('./files.ts');
+  const text = 'Here you go.\n\n```html filename="index.html"\n<h1>Hi</h1>\n```\n\nAll set.';
+  const stripped = stripNamedCodeBlocks(text);
+  assert.doesNotMatch(stripped, /<h1>Hi<\/h1>/, 'the code does not stay in the chat');
+  assert.match(stripped, /Here you go\./);
+  assert.match(stripped, /All set\./);
+});
+
+test('an unnamed snippet stays in the transcript', async () => {
+  const { stripNamedCodeBlocks } = await import('./files.ts');
+  // A short example in an explanation is not a file; removing it would be wrong.
+  const text = 'Call it like this:\n\n```js\nuseEffect(() => {}, []);\n```\n';
+  assert.equal(stripNamedCodeBlocks(text), text);
+});
+
+test('fallback files get the same chip data as tagged writes', () => {
+  const existing = [{ id: 'f1', name: 'app.js', content: 'const a = 1;', origin: 'generated' }];
+  const generated = [{ id: 'f2', name: 'index.html', content: '<h1>Hi</h1>\n<p>There</p>', origin: 'generated' }];
+  const results = opResultsForFiles(existing, generated);
+  assert.equal(results.length, 1);
+  assert.deepEqual({ path: results[0].path, status: results[0].status, added: results[0].added, removed: results[0].removed },
+    { path: 'index.html', status: 'applied', added: 2, removed: 0 });
+  assert.equal(results[0].fileId, 'f2');
+  assert.ok(results[0].diff.length > 0, 'the canvas can still show a diff');
+});
+
+test('a fallback file that replaces an existing one reports the real change', () => {
+  const existing = [{ id: 'f1', name: 'app.js', content: 'const a = 1;', origin: 'generated' }];
+  const generated = [{ id: 'f2', name: 'app.js', content: 'const a = 2;\nconst b = 3;', origin: 'generated' }];
+  const results = opResultsForFiles(existing, generated);
+  assert.deepEqual({ added: results[0].added, removed: results[0].removed }, { added: 2, removed: 1 });
 });

@@ -2,13 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDownToLine, Check, ChevronRight, Code2, KeyRound, Menu, PanelRightOpen } from 'lucide-react';
 import type { AppConfig, AttachedFile, ChatMessage, Conversation, Credentials, ModelInfo, Provider, SearchMode, WorkspaceFile } from './types';
 import { CURATED_MODELS, DEFAULT_MODEL } from './lib/models';
-import { createDraft, downloadConversation, extractCodeFiles, mergeGeneratedFiles, toProviderMessages } from './lib/files';
+import { createDraft, downloadConversation, extractCodeFiles, mergeGeneratedFiles, stripNamedCodeBlocks, toProviderMessages } from './lib/files';
 import { hasSavedModel, loadActiveId, loadConversations, loadCredentials, loadModel, loadSearchMode, saveActiveId, saveConversations, saveCredentials, saveModel, saveSearchMode } from './lib/storage';
 import { newId } from './lib/id.ts';
 import { isUsableFreeCatalogModel } from './lib/model-policy.mjs';
 import { requestChat } from './lib/chat';
 import { MAX_CONTINUATIONS, continuationInstruction, stripOverlap } from './lib/continuation';
-import { applyFileOp, stripFileBlocks, tidyProse } from './lib/file-ops';
+import { applyFileOp, opResultsForFiles, stripFileBlocks, tidyProse } from './lib/file-ops';
 import { Brand } from './components/Brand';
 import Sidebar from './components/Sidebar';
 import ChatPanel from './components/ChatPanel';
@@ -242,6 +242,9 @@ export default function App() {
     let rawText = '';
     let actualModel = selectedModel.name;
     let endedShort = false;
+    // A write the time limit cut short. Replayed into the next attempt so the
+    // model carries on inside the same block instead of starting a new one.
+    let pendingBlock = '';
 
     // Writes straight to the canvas. Applied inside the state updater so it
     // always sees the current file list, even if the user edits mid-stream.
@@ -281,6 +284,7 @@ export default function App() {
             searchKey: credentials.searchKey,
             searchMode: attempt === 0 ? searchMode : 'off',
             canvas: canvasManifest,
+            resume: attempt > 0 ? pendingBlock : undefined,
             accessCode: credentials.accessCode,
             signal: controller.signal,
             onEvent: (event) => {
@@ -307,7 +311,8 @@ export default function App() {
                 // will finish it on the next attempt.
                 hopText += event.raw || '';
                 rawText += event.raw || '';
-                if (event.status !== 'incomplete') applyOp(event);
+                if (event.status === 'incomplete') pendingBlock = event.raw || '';
+                else { pendingBlock = ''; applyOp(event); }
               }
               if (event.type === 'model' && event.model) {
                 actualModel = event.model.split('/').at(-1)?.replace(':free', '') || event.model;
@@ -358,15 +363,23 @@ export default function App() {
         // so a file is never created twice from the same answer.
         const generated = ops.length ? [] : extractCodeFiles(text, chat.files);
         const files = mergeGeneratedFiles(chat.files, generated);
+        const fallbackOps = generated.length ? opResultsForFiles(chat.files, generated) : [];
+        // A named block became a canvas file, so its code leaves the transcript.
+        const content = generated.length ? tidyProse(stripNamedCodeBlocks(text)) : text;
+        const all = [...applied, ...fallbackOps];
         if (failed.length) summary = `${failed[0].error}`;
-        else if (applied.length) {
-          const changed = applied.filter((op) => op.action !== 'delete');
+        else if (all.length) {
+          const changed = all.filter((op) => op.action !== 'delete');
           summary = `${changed.length} ${changed.length === 1 ? 'file' : 'files'} written to Canvas`;
-        } else if (generated.length) summary = `${generated.length} ${generated.length === 1 ? 'file' : 'files'} added to Canvas`;
+        }
         return {
           ...chat, updatedAt: Date.now(), files,
           selectedFileId: generated[0]?.id || chat.selectedFileId,
-          messages: chat.messages.map((message) => message.id === assistantId ? { ...message, content: text, status: 'done', model: actualModel, truncated: endedShort, continuation: undefined, searchStatus: undefined, searchQuery: undefined } : message),
+          messages: chat.messages.map((message) => message.id === assistantId ? {
+            ...message, content, status: 'done', model: actualModel, truncated: endedShort,
+            fileOps: ops.length ? ops : fallbackOps.length ? fallbackOps : undefined,
+            continuation: undefined, searchStatus: undefined, searchQuery: undefined,
+          } : message),
         };
       }));
       if (summary) notify(summary);

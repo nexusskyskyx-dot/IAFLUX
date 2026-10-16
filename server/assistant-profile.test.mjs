@@ -37,11 +37,13 @@ test('the central capability profile covers shipped features and keeps identity 
   assert.match(prompt, /cannot.*run commands or tests, deploy code/);
   // The write protocol has to be spelled out, or code never reaches the canvas.
   assert.match(prompt, /<aiflux-write path="index\.html">/);
-  assert.match(prompt, /<aiflux-patch path="index\.html">/);
+  assert.match(prompt, /<aiflux-patch path="app\.js">/);
   assert.match(prompt, /<<<<<<< SEARCH/);
   assert.match(prompt, /<aiflux-delete path="old\.html" \/>/);
   // The model is told what is already there so it patches instead of rewriting.
   assert.match(prompt, /Files on the Canvas right now:/);
+  // Models fall back on wrapper tags from training unless explicitly warned off.
+  for (const banned of ['<document>', '<file>', '<artifact>']) assert.match(prompt, new RegExp(`Do not wrap output in .*${banned.replace(/[<>]/g, (c) => `\\${c}`)}`, 's'));
 });
 
 test('the canvas manifest reaches the prompt so the model patches rather than rewrites', () => {

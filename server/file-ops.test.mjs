@@ -118,3 +118,76 @@ test('an unterminated hunk is dropped rather than guessed at', () => {
   assert.deepEqual(parseHunks('<<<<<<< SEARCH\nunfinished\n=======\nreplacement'), []);
   assert.deepEqual(parseHunks('no markers here'), []);
 });
+
+// Models trained on other artifact formats fall back on wrapper tags we did not
+// ask for. Guessing wrong here means the canvas silently does nothing.
+test('a <document> block with a path is treated as a write', () => {
+  const { text, ops } = collect(['Here it is.\n<document path="index.html">\n<h1>Hi</h1>\n</document>\nDone.']);
+  assert.equal(text, 'Here it is.\n\nDone.');
+  assert.equal(ops.length, 1);
+  assert.deepEqual({ action: ops[0].action, path: ops[0].path, content: ops[0].content }, { action: 'write', path: 'index.html', content: '<h1>Hi</h1>' });
+});
+
+test('<file> and <artifact> wrappers work the same way', () => {
+  for (const tag of ['file', 'artifact', 'Document', 'FILE']) {
+    const { ops } = collect([`<${tag} path="a.js">const a = 1;</${tag}>`]);
+    assert.equal(ops[0]?.action, 'write', tag);
+    assert.equal(ops[0]?.path, 'a.js', tag);
+    assert.equal(ops[0]?.content, 'const a = 1;', tag);
+  }
+});
+
+test('any of path, file, filename or name names the target', () => {
+  for (const attr of ['path', 'file', 'filename', 'name']) {
+    const { ops } = collect([`<aiflux-write ${attr}="a.js">x</aiflux-write>`]);
+    assert.equal(ops[0]?.path, 'a.js', attr);
+  }
+});
+
+test('a wrapper with no path passes its content through instead of vanishing', () => {
+  // Nothing is lost: the body reaches the chat, where the fenced-block
+  // fallback can still turn it into a canvas file.
+  const { text, ops } = collect(['Intro.\n<document>\n```html\n<h1>Hi</h1>\n```\n</document>\nOutro.']);
+  assert.deepEqual(ops, []);
+  assert.equal(text, 'Intro.\n\n```html\n<h1>Hi</h1>\n```\n\nOutro.');
+});
+
+test('an unclosed wrapper keeps its content but drops the tag', () => {
+  // Nothing is lost, and the decorative tag never reaches the transcript.
+  const { text, ops } = collect(['Intro. <document>\nstill writing']);
+  assert.deepEqual(ops, []);
+  assert.doesNotMatch(text, /<document>/, 'the tag never reaches the transcript');
+  assert.match(text, /still writing/, 'but the content is not lost');
+});
+
+test('a bare wrapper becomes a named fenced block the client can pick up', () => {
+  const { text, ops } = collect(['<document>\n<!doctype html>\n<title>Hi</title>\n</document>']);
+  assert.deepEqual(ops, [], 'handled by the fenced-block fallback instead');
+  assert.equal(text.trim(), '```html filename="index.html"\n<!doctype html>\n<title>Hi</title>\n```');
+});
+
+test('a bare wrapper already containing a fence is left alone', () => {
+  const inner = '```html\n<h1>Hi</h1>\n```';
+  const { text } = collect([`<document>\n${inner}\n</document>`]);
+  assert.equal(text.trim(), inner, 'double-wrapping would mangle it');
+});
+
+test('a filename comment inside a bare wrapper names the file', () => {
+  const { text } = collect(['<document>\n// src/app.js\nconst a = 1;\n</document>']);
+  assert.match(text, /filename="src\/app\.js"/);
+});
+
+test('a block containing a second opening tag is refused rather than written', () => {
+  const { ops } = collect(['<aiflux-write path="a.js">const a = 1;\n<aiflux-write path="a.js">const a = 1;</aiflux-write>\n</aiflux-write>']);
+  assert.equal(ops.length, 1);
+  assert.equal(ops[0].status, 'invalid');
+  assert.match(ops[0].error, /second opening tag/);
+  assert.equal(ops[0].content, undefined, 'nothing is written');
+});
+
+test('ordinary HTML and comparison operators stay in the prose', () => {
+  const prose = 'Use <div> here, check a < b and 3 < 5, then <span>ok</span>.';
+  const { text, ops } = collect([prose]);
+  assert.equal(text, prose);
+  assert.deepEqual(ops, []);
+});

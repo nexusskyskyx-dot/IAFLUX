@@ -75,11 +75,37 @@ export function fileColor(name: string): string {
   return 'muted';
 }
 
+/** Wrapper tags models fall back on when they ignore the write protocol. */
+const WRAPPER = /<(document|file|artifact)\b[^>]*>\n?([\s\S]*?)<\/\1\s*>/gi;
+
+/** Best-effort language for content that arrived without one. */
+function guessLanguage(content: string): string {
+  if (/^\s*(<!doctype html|<html[\s>])/i.test(content)) return 'html';
+  if (/^\s*<svg[\s>]/i.test(content)) return 'svg';
+  if (/^\s*[.#@][\w-]+[^{;]*\{/m.test(content) && /[};]\s*$/.test(content)) return 'css';
+  if (/^\s*[{[]/.test(content) && /[}\]]\s*$/.test(content)) return 'json';
+  if (/^\s*(from |import |def |class )\w/m.test(content)) return 'py';
+  if (/^\s*(import |export |function |const |let |var |=>)/m.test(content)) return 'js';
+  return 'txt';
+}
+
+/**
+ * Turns wrapper blocks into fenced ones so a model that emits `<document>`
+ * instead of a tagged write still gets its code onto the canvas.
+ */
+function unwrapBlocks(markdown: string): string {
+  return markdown.replace(WRAPPER, (_match, _tag: string, body: string) => {
+    const content = body.replace(/^\n/, '').replace(/\n$/, '');
+    if (!content.trim()) return '';
+    return `\n\`\`\`${guessLanguage(content)}\n${content}\n\`\`\`\n`;
+  });
+}
+
 export function extractCodeFiles(markdown: string, existing: WorkspaceFile[]): WorkspaceFile[] {
   const blocks = /```([^\n]*)\n([\s\S]*?)```/g;
   const found: WorkspaceFile[] = [];
   let match: RegExpExecArray | null;
-  while ((match = blocks.exec(markdown)) !== null) {
+  while ((match = blocks.exec(unwrapBlocks(markdown))) !== null) {
     const info = match[1].trim();
     let content = match[2].replace(/\n$/, '');
     if (!content.trim()) continue;
@@ -102,6 +128,18 @@ export function extractCodeFiles(markdown: string, existing: WorkspaceFile[]): W
     found.push({ id: newId(), name, content, origin: 'generated' });
   }
   return found;
+}
+
+/**
+ * Removes fenced blocks that carry an explicit filename. Those are the blocks
+ * `extractCodeFiles` turns into canvas files, so keeping them in the
+ * transcript would put the code back into the chat. Blocks without a name are
+ * illustrative snippets and are left alone.
+ */
+const NAMED_FENCE = /\n?```[^\n]*(?:filename|file|title)\s*=\s*["']?([^\s"']+)[^\n]*\n[\s\S]*?```\n?/gi;
+
+export function stripNamedCodeBlocks(markdown: string): string {
+  return markdown.replace(NAMED_FENCE, '\n');
 }
 
 export function mergeGeneratedFiles(existing: WorkspaceFile[], generated: WorkspaceFile[]): WorkspaceFile[] {

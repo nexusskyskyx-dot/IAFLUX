@@ -109,6 +109,20 @@ export function stripFileBlocks(text: string): string {
   return out;
 }
 
+/**
+ * Builds chip data for files created by the fenced-block fallback, so a model
+ * that ignored the write protocol still gets the same canvas treatment.
+ */
+export function opResultsForFiles(existing: WorkspaceFile[], generated: WorkspaceFile[]): FileOpResult[] {
+  return generated.map((file) => {
+    const before = existing.find((item) => item.name === file.name)?.content ?? '';
+    return {
+      path: file.name, action: 'write', status: 'applied',
+      ...diffStats(before, file.content), diff: diffLines(before, file.content), fileId: file.id,
+    };
+  });
+}
+
 /** The most recent successful change to `name`, for the canvas diff view. */
 export function latestChange(messages: { fileOps?: FileOpResult[] }[], name: string): FileOpResult | null {
   for (let index = messages.length - 1; index >= 0; index -= 1) {

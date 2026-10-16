@@ -32,7 +32,7 @@ export function validateChat(body, ollamaConfigured = false) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     throw new RequestError(400, 'Invalid request.');
   }
-  const { provider, model, messages, searchMode = 'off', canvas } = body;
+  const { provider, model, messages, searchMode = 'off', canvas, resume } = body;
   if (!['off', 'auto', 'always'].includes(searchMode)) {
     throw new RequestError(400, 'Choose a valid web search mode.');
   }
@@ -87,7 +87,15 @@ export function validateChat(body, ollamaConfigured = false) {
         return name ? `${name} — ${lines} ${lines === 1 ? 'line' : 'lines'}` : null;
       }).filter(Boolean)
     : [];
-  return { provider, model, messages: cleanMessages, searchMode, canvasFiles };
+  // A write the previous attempt ran out of time inside. The server replays it
+  // into the parser so the continuation completes the same block instead of
+  // starting a new one. Never arbitrary text: it must open a tagged block.
+  // Rejected outright if oversized: truncating it would leave the block
+  // unterminated and corrupt the file it was meant to complete.
+  const resumeBlock = typeof resume === 'string' && resume.length <= 400_000 && /^\s*<aiflux-(write|patch)\b/i.test(resume)
+    ? resume
+    : '';
+  return { provider, model, messages: cleanMessages, searchMode, canvasFiles, resumeBlock };
 }
 
 export function buildRequest({ provider, model, messages, searchMode = 'off', searchPerformed = false, systemPrompt, canvasFiles = [] }, key, ollamaBaseUrl) {

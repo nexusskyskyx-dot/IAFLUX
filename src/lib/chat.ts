@@ -32,6 +32,8 @@ export async function requestChat(input: {
   searchMode: SearchMode;
   /** Canvas manifest: names and line counts, so the model patches what exists. */
   canvas?: { name: string; lines: number }[];
+  /** The unfinished tagged block from the previous attempt, replayed server-side. */
+  resume?: string;
   accessCode: string;
   signal: AbortSignal;
   onEvent: (event: StreamEvent) => void;
@@ -44,7 +46,7 @@ export async function requestChat(input: {
       ...(input.searchMode !== 'off' && input.searchKey ? { 'x-aiflux-search-key': input.searchKey } : {}),
       ...(input.accessCode ? { 'x-aiflux-access-code': input.accessCode } : {}),
     },
-    body: JSON.stringify({ provider: input.provider, model: input.model, messages: input.messages, searchMode: input.searchMode, canvas: input.canvas }),
+    body: JSON.stringify({ provider: input.provider, model: input.model, messages: input.messages, searchMode: input.searchMode, canvas: input.canvas, resume: input.resume }),
     signal: input.signal,
   });
   if (!response.ok) {

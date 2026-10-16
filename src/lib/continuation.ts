@@ -22,6 +22,13 @@ function insideFence(text: string): boolean {
   return (text.match(/```/g) || []).length % 2 === 1;
 }
 
+/** True when `text` ends inside a tagged block that was never closed. */
+export function hasOpenBlock(text: string): boolean {
+  const opens = (text.match(/<aiflux-(write|patch)\b/gi) || []).length;
+  const closes = (text.match(/<\/aiflux-(write|patch)\s*>/gi) || []).length;
+  return opens > closes;
+}
+
 export function continuationInstruction(partial: string, budget = DEFAULT_TAIL_BUDGET): string {
   const limit = Math.max(4_000, Math.floor(budget));
   const tail = partial.length > limit ? partial.slice(-limit) : partial;
@@ -32,9 +39,13 @@ export function continuationInstruction(partial: string, budget = DEFAULT_TAIL_B
     '- Output ONLY the remaining text, starting at the exact point where it stopped.',
     '- Do not repeat, restate, summarise or rewrite any part of what you already wrote.',
     '- Do not add a preamble, apology, heading, or any comment about being cut off.',
-    insideFence(tail)
-      ? '- You were inside a fenced code block that never closed. Write only the remaining lines of that block, then close it with a line containing three backticks.'
-      : '- Do not open a new code block unless the content genuinely calls for one.',
+    // The parser is already inside the block, so the model must carry on in
+    // place. Re-opening the tag would nest one block inside the other.
+    hasOpenBlock(partial)
+      ? '- You were inside a tagged file block that never closed. Continue writing its contents from exactly where it stopped and close it with the matching </aiflux-write> or </aiflux-patch> tag. Do NOT repeat the opening tag.'
+      : insideFence(tail)
+        ? '- You were inside a fenced code block that never closed. Write only the remaining lines of that block, then close it with a line containing three backticks.'
+        : '- Do not open a new code block unless the content genuinely calls for one.',
     '- Keep the same language, tone, formatting and indentation.',
   ];
   if (partial.length > limit) lines.push('- Only the tail of what you had written is shown; carry on from it.');

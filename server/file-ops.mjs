@@ -16,13 +16,43 @@
  *   >>>>>>> REPLACE
  *   </aiflux-patch>
  *   <aiflux-delete path="src/old.js" />
+ *
+ * Models do not always use our tag. They fall back on wrapper tags they saw in
+ * training — <document>, <file>, <artifact> — so those are accepted too: with a
+ * path they become a write, and without one the wrapper is dropped and the body
+ * passes through as prose, where the fenced-block fallback can still find it.
  */
 
-const TAG_PREFIX = '<aiflux-';
-const OPEN_TAG = /^<aiflux-(write|patch|delete)\s*([^>]*)>/i;
+const AIFLUX_TAGS = ['aiflux-write', 'aiflux-patch', 'aiflux-delete'];
+const VARIANT_TAGS = ['document', 'file', 'artifact'];
+const TAG_NAMES = [...AIFLUX_TAGS, ...VARIANT_TAGS];
+const OPEN_TAG = new RegExp(`<(${TAG_NAMES.join('|')})\\b([^>]*)>`, 'i');
+/** A nested operation inside a block means the model re-opened a tag it was in. */
+const NESTED_OP = /<aiflux-(write|patch|delete)\b/i;
 
 /** Guard against a model that opens a block and never closes it. */
 const MAX_BLOCK_CHARS = 400_000;
+
+/**
+ * An unfinished tag at the very end of a chunk: an opening bracket, an
+ * optional slash, a name, and then anything except the `>` that would end it.
+ * Requiring at least one name character keeps ordinary prose like `a < b`
+ * flowing instead of buffering the rest of the message.
+ */
+const TAG_FRAGMENT = /^<\/?[a-z][a-z0-9-]*(\s[^>]*)?$/i;
+const MAX_HOLD = 1_024;
+
+/** Chars to hold back so a tag split across chunks is not emitted as content. */
+function tagFragmentHold(text) {
+  const at = text.lastIndexOf('<');
+  if (at < 0) return 0;
+  const tail = text.slice(at);
+  if (tail.length > MAX_HOLD) return 0;
+  // A bracket that arrived on its own must wait for its name, but a bare `<`
+  // followed by text is prose and must not stall the rest of the message.
+  if (tail === '<' || tail === '</') return tail.length;
+  return TAG_FRAGMENT.test(tail) ? tail.length : 0;
+}
 
 function attribute(attrs, name) {
   const match = attrs.match(new RegExp(`(?:^|\\s)${name}\\s*=\\s*("([^"]*)"|'([^']*)'|([^\\s/>]+))`, 'i'));
@@ -30,13 +60,30 @@ function attribute(attrs, name) {
   return match[2] ?? match[3] ?? match[4] ?? '';
 }
 
-/** Length of the longest suffix of `text` that could still grow into `prefix`. */
-function tailPrefixLength(text, prefix) {
-  const longest = Math.min(prefix.length - 1, text.length);
-  for (let size = longest; size > 0; size -= 1) {
-    if (text.endsWith(prefix.slice(0, size))) return size;
+/** Models label the target with `path`, `file`, `filename` or `name`. */
+function pathOf(attrs) {
+  for (const key of ['path', 'file', 'filename', 'name']) {
+    const value = attribute(attrs, key);
+    if (value) return value.trim();
   }
-  return 0;
+  return '';
+}
+
+/** A filename the model wrote as a leading comment, if it wrote one. */
+function commentFilename(content) {
+  const match = content.match(/^\s*(?:\/\/|#|<!--)\s*(?:file(?:name)?\s*[:=]\s*)?([\w./-]+\.[a-z\d]+)/i);
+  return match ? match[1] : '';
+}
+
+/** Best-effort language for a body that arrived with no language of its own. */
+function guessLanguage(content) {
+  if (/^\s*(<!doctype html|<html[\s>])/i.test(content)) return 'html';
+  if (/^\s*<svg[\s>]/i.test(content)) return 'svg';
+  if (/^\s*[.#@][\w-]+[^{;]*\{/m.test(content) && /[};]\s*$/.test(content)) return 'css';
+  if (/^\s*[{[]/.test(content) && /[}\]]\s*$/.test(content)) return 'json';
+  if (/^\s*(from |import |def |class )\w/m.test(content)) return 'py';
+  if (/^\s*(import |export |function |const |let |var |=>)/m.test(content)) return 'js';
+  return 'txt';
 }
 
 /**
@@ -66,51 +113,76 @@ export function parseHunks(body) {
 
 export function createFileOpParser({ onText, onOp, maxBlock = MAX_BLOCK_CHARS } = {}) {
   let buffer = '';
-  let block = null; // { action, path, raw, body }
+  let block = null; // { tag, action, path, raw, body }
 
   const emit = (text) => { if (text) onText(text); };
+
+  function openBlock(tag, attrs, raw) {
+    if (tag === 'aiflux-delete') {
+      onOp({ action: 'delete', path: pathOf(attrs), status: 'done', raw });
+      return;
+    }
+    const path = pathOf(attrs);
+    // A variant wrapper only becomes a file when the model named the target.
+    // Otherwise it is transparent: the body flows through as ordinary prose.
+    const action = tag === 'aiflux-write' ? 'write' : tag === 'aiflux-patch' ? 'patch' : path ? 'write' : 'transparent';
+    block = { tag, action, path, raw, body: '' };
+  }
+
+  function closeBlock(closeRaw) {
+    const { tag, action, path, raw, body } = block;
+    const full = raw + body + closeRaw;
+    block = null;
+    if (action === 'transparent') {
+      // A wrapper the model chose for itself. The tags are dropped and the body
+      // is re-emitted as a *named* fenced block, so the client's fenced-block
+      // fallback turns it into a canvas file and can strip it from the chat.
+      const content = body.replace(/^\n/, '').replace(/\n$/, '');
+      if (!content.trim()) return;
+      // Already fenced: wrapping again would mangle it, so let the client's
+      // fenced-block fallback handle the inner block as it stands.
+      if (/```/.test(content)) { emit(`\n${content}\n`); return; }
+      const language = guessLanguage(content);
+      const name = commentFilename(content) || (language === 'html' ? 'index.html' : `snippet.${language}`);
+      emit(`\n\`\`\`${language} filename="${name}"\n${content}\n\`\`\`\n`);
+      return;
+    }
+    if (action === 'write' || action === 'patch') {
+      if (NESTED_OP.test(body)) {
+        // The model re-opened a tag instead of continuing inside it. Writing
+        // that out would corrupt the file, so refuse and say why.
+        onOp({ action, path, status: 'invalid', error: `The block for ${path || 'the file'} contained a second opening tag.`, raw: full });
+        return;
+      }
+    }
+    onOp(action === 'write'
+      ? { action: 'write', path, content: body.replace(/^\n/, '').replace(/\n$/, ''), status: 'done', raw: full }
+      : { action: 'patch', path, hunks: parseHunks(body), status: 'done', raw: full });
+  }
 
   function drain(final) {
     for (;;) {
       if (!block) {
-        const at = buffer.indexOf(TAG_PREFIX);
-        if (at < 0) {
-          // Hold back a trailing fragment that might yet become a tag.
-          const hold = final ? 0 : tailPrefixLength(buffer, TAG_PREFIX);
-          const safe = buffer.length - hold;
-          if (safe <= 0) return;
-          emit(buffer.slice(0, safe));
-          buffer = buffer.slice(safe);
+        const limit = buffer.length - (final ? 0 : tagFragmentHold(buffer));
+        const found = OPEN_TAG.exec(buffer.slice(0, Math.max(0, limit)));
+        if (!found) {
+          if (limit <= 0) return;
+          emit(buffer.slice(0, limit));
+          buffer = buffer.slice(limit);
           return;
         }
-        if (at > 0) { emit(buffer.slice(0, at)); buffer = buffer.slice(at); continue; }
-
-        const open = buffer.match(OPEN_TAG);
-        if (!open) {
-          if (final) { emit(buffer); buffer = ''; return; }
-          // Still plausible: no '>' has arrived, so the tag may be incomplete.
-          if (buffer.includes('>')) { emit(TAG_PREFIX); buffer = buffer.slice(TAG_PREFIX.length); continue; }
-          return;
-        }
-        const [, action, attrs] = open;
-        const kind = action.toLowerCase();
-        buffer = buffer.slice(open[0].length);
-        if (kind === 'delete') {
-          onOp({ action: 'delete', path: attribute(attrs, 'path'), status: 'done', raw: open[0] });
-          continue;
-        }
-        block = { action: kind, path: attribute(attrs, 'path'), raw: open[0], body: '' };
+        if (found.index > 0) { emit(buffer.slice(0, found.index)); buffer = buffer.slice(found.index); continue; }
+        const tag = found[1].toLowerCase();
+        const attrs = found[2] ?? '';
+        buffer = buffer.slice(found[0].length);
+        openBlock(tag, attrs, found[0]);
         continue;
       }
 
-      const close = `</aiflux-${block.action}>`;
-      const at = buffer.indexOf(close);
-      if (at < 0) {
-        // Hold back a tail that could still turn out to be the start of the
-        // closing tag; otherwise a tag split across chunks is eaten as content.
-        const hold = tailPrefixLength(buffer, close);
-        const safe = buffer.length - hold;
-        if (safe > 0) { block.body += buffer.slice(0, safe); buffer = buffer.slice(safe); }
+      const close = new RegExp(`</${block.tag}\\s*>`, 'i').exec(buffer);
+      if (!close) {
+        const limit = buffer.length - (final ? 0 : tagFragmentHold(buffer));
+        if (limit > 0) { block.body += buffer.slice(0, limit); buffer = buffer.slice(limit); }
         if (block.body.length > maxBlock) {
           // Runaway block: hand the text back rather than buffering forever.
           emit(block.raw + block.body);
@@ -118,13 +190,9 @@ export function createFileOpParser({ onText, onOp, maxBlock = MAX_BLOCK_CHARS } 
         }
         return;
       }
-      block.body += buffer.slice(0, at);
-      const raw = block.raw + block.body + close;
-      buffer = buffer.slice(at + close.length);
-      onOp(block.action === 'write'
-        ? { action: 'write', path: block.path, content: block.body.replace(/^\n/, '').replace(/\n$/, ''), status: 'done', raw }
-        : { action: 'patch', path: block.path, hunks: parseHunks(block.body), status: 'done', raw });
-      block = null;
+      block.body += buffer.slice(0, close.index);
+      buffer = buffer.slice(close.index + close[0].length);
+      closeBlock(close[0]);
     }
   }
 
@@ -134,9 +202,11 @@ export function createFileOpParser({ onText, onOp, maxBlock = MAX_BLOCK_CHARS } 
     end() {
       drain(true);
       if (block) {
-        // Incomplete: never applied to a file, but the raw text is returned so
-        // the client can resume exactly where the model stopped.
-        onOp({ action: block.action, path: block.path, status: 'incomplete', raw: block.raw + block.body });
+        // A transparent wrapper is only decorative, so its text is prose.
+        if (block.action === 'transparent') emit(block.body);
+        // An AIFLUX block is incomplete: never applied to a file, but the raw
+        // text is returned so the client can resume exactly where it stopped.
+        else onOp({ action: block.action, path: block.path, status: 'incomplete', raw: block.raw + block.body });
         block = null;
       }
       if (buffer) { emit(buffer); buffer = ''; }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MAX_CONTINUATIONS, continuationInstruction, stripOverlap } from './continuation.ts';
+import { MAX_CONTINUATIONS, continuationInstruction, hasOpenBlock, stripOverlap } from './continuation.ts';
 
 test('the continuation prompt carries the tail of the answer and forbids repeating it', () => {
   const partial = 'Here is the component you asked for.\n\n```ts\nexport function Button() {\n  return <button>Hi</button>;\n';
@@ -68,4 +68,22 @@ test('empty inputs are handled without throwing', () => {
 test('a continuation that is entirely a repeat contributes nothing new', () => {
   assert.equal(stripOverlap('const total = 42;', '42;'), '');
   assert.equal(stripOverlap('one\ntwo\n', 'one\ntwo\n'), '');
+});
+
+test('a cut-off tagged block is detected so the resume does not re-open it', () => {
+  assert.equal(hasOpenBlock('Intro.\n<aiflux-write path="a.js">\nconst a = 1;'), true);
+  assert.equal(hasOpenBlock('Intro.\n<aiflux-write path="a.js">\nconst a = 1;\n</aiflux-write>'), false);
+  assert.equal(hasOpenBlock('Just prose here.'), false);
+  assert.equal(hasOpenBlock('<aiflux-patch path="a.js">\n<<<<<<< SEARCH'), true);
+});
+
+test('the resume tells the model to continue in place rather than repeat the tag', () => {
+  const partial = 'Done.\n<aiflux-write path="big.html">\n<h1>half';
+  const prompt = continuationInstruction(partial);
+  assert.match(prompt, /tagged file block that never closed/);
+  assert.match(prompt, /Do NOT repeat the opening tag/);
+  // A plain answer cut off outside a block gets the fence guidance instead.
+  const plain = continuationInstruction('Half of an idea\n\n```js\nconst a = 1;');
+  assert.match(plain, /fenced code block that never closed/);
+  assert.doesNotMatch(plain, /Do NOT repeat the opening tag/);
 });

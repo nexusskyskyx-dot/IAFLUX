@@ -217,33 +217,42 @@ app.post('/api/chat', rateLimit, async (req, res) => {
       onText: (text) => sendEvent(res, { type: 'delta', text }),
       onOp: (op) => sendEvent(res, { type: 'file', ...op }),
     });
+    // Replay the block the last attempt was cut off inside, so this stream
+    // finishes the very same write rather than opening a second one.
+    if (input.resumeBlock) parser.push(input.resumeBlock);
     const chunks = format === 'ollama' ? readLines(upstream.body) : readSSE(upstream.body);
-    for await (const data of chunks) {
-      if (controller.signal.aborted) break;
-      const part = extractChunk(format, data);
-      if (part.error) {
-        const safeMessage = key ? String(part.error).replaceAll(key, '[redacted]') : String(part.error);
-        throw new RequestError(502, safeMessage.slice(0, 320));
+    // `finally` matters: when the request budget aborts the stream, the parser
+    // must still flush, or a half-written block is lost and the canvas silently
+    // receives nothing.
+    try {
+      for await (const data of chunks) {
+        if (controller.signal.aborted) break;
+        const part = extractChunk(format, data);
+        if (part.error) {
+          const safeMessage = key ? String(part.error).replaceAll(key, '[redacted]') : String(part.error);
+          throw new RequestError(502, safeMessage.slice(0, 320));
+        }
+        // OpenRouter and xKiro are multi-vendor gateways, so a mislabelled route
+        // can answer with a safety or utility model. Stop the stream rather than
+        // presenting that output as a coding answer.
+        if (part.model && (input.provider === 'openrouter' || input.provider === 'xkiro')
+            && (part.model === 'openrouter/free' || isNonChatModelId(part.model))) {
+          throw new RequestError(502, 'The provider returned a safety or utility model instead of a coding assistant. Choose another free model.');
+        }
+        if (part.model && part.model !== usedModel) {
+          usedModel = part.model;
+          sendEvent(res, { type: 'model', model: usedModel });
+        }
+        if (part.text) {
+          if (!hasText && stopKeepAlive) { stopKeepAlive(); stopKeepAlive = null; }
+          hasText = true;
+          parser.push(part.text);
+        }
+        if (part.done) break;
       }
-      // OpenRouter and xKiro are multi-vendor gateways, so a mislabelled route
-      // can answer with a safety or utility model. Stop the stream rather than
-      // presenting that output as a coding answer.
-      if (part.model && (input.provider === 'openrouter' || input.provider === 'xkiro')
-          && (part.model === 'openrouter/free' || isNonChatModelId(part.model))) {
-        throw new RequestError(502, 'The provider returned a safety or utility model instead of a coding assistant. Choose another free model.');
-      }
-      if (part.model && part.model !== usedModel) {
-        usedModel = part.model;
-        sendEvent(res, { type: 'model', model: usedModel });
-      }
-      if (part.text) {
-        if (!hasText && stopKeepAlive) { stopKeepAlive(); stopKeepAlive = null; }
-        hasText = true;
-        parser.push(part.text);
-      }
-      if (part.done) break;
+    } finally {
+      parser.end();
     }
-    parser.end();
     if (!controller.signal.aborted) {
       if (!hasText) sendEvent(res, { type: 'error', message: 'The model returned no text. Try another model or rephrase your request.' });
       else sendEvent(res, { type: 'done', model: usedModel });
