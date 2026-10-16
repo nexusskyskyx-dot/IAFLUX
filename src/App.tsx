@@ -391,6 +391,13 @@ export default function App() {
       const editableTargets = userMessage.attachments?.flatMap((attachment) =>
         attachment.canvasFileId ? [{ id: attachment.canvasFileId, name: attachment.name, content: attachment.content }] : [],
       ) || [];
+      const latestFiles = chatsRef.current.find((chat) => chat.id === chatId)?.files || updated.files;
+      const contextEdit = extractCodeFiles(text, latestFiles, editableTargets).find((generated) =>
+        editableTargets.some((target) => target.id === generated.id),
+      );
+      if (contextEdit) setContextFile((current) => current?.canvasFileId === contextEdit.id
+        ? { ...current, content: contextEdit.content }
+        : current);
       const count = extractCodeFiles(text, updated.files, editableTargets).length;
       setChats((previous) => previous.map((chat) => {
         if (chat.id !== chatId) return chat;
@@ -417,10 +424,15 @@ export default function App() {
   };
 
   const selectFile = (id: string) => updateActive((chat) => ({ ...chat, selectedFileId: id }));
-  const updateFile = (id: string, content: string) => updateActive((chat) => ({ ...chat, updatedAt: Date.now(), files: chat.files.map((file) => file.id === id ? {
-    ...file, content, origin: 'user', previousContent: file.lastChangedBy === 'user' ? file.previousContent ?? file.content : file.content, lastChangedBy: 'user',
-  } : file) }));
+  const updateFile = (id: string, content: string) => {
+    setContextFile((current) => current?.canvasFileId === id && current.content !== content ? { ...current, content } : current);
+    updateActive((chat) => ({ ...chat, updatedAt: Date.now(), files: chat.files.map((file) => file.id === id ? {
+      ...file, content, origin: 'user', previousContent: file.lastChangedBy === 'user' ? file.previousContent ?? file.content : file.content, lastChangedBy: 'user',
+    } : file) }));
+  };
   const restoreFile = (id: string) => {
+    const restoredContent = activeChat.files.find((file) => file.id === id)?.previousContent;
+    if (restoredContent !== undefined) setContextFile((current) => current?.canvasFileId === id ? { ...current, content: restoredContent } : current);
     updateActive((chat) => ({ ...chat, updatedAt: Date.now(), files: chat.files.map((file) => file.id === id && file.previousContent !== undefined ? {
       ...file, content: file.previousContent, previousContent: file.previousContent, origin: 'user', lastChangedBy: 'user',
     } : file) }));
@@ -432,6 +444,7 @@ export default function App() {
     notify(`${name} added to Canvas`);
   };
   const deleteFile = (id: string) => {
+    if (contextFile?.canvasFileId === id) setContextFile(null);
     updateActive((chat) => {
       const files = chat.files.filter((file) => file.id !== id);
       return { ...chat, updatedAt: Date.now(), files, selectedFileId: chat.selectedFileId === id ? files[0]?.id || null : chat.selectedFileId };
@@ -442,10 +455,10 @@ export default function App() {
     const canApplyCanvasEdit = file.content.length <= 100_000;
     setContextFile({
       name: file.name, content: canApplyCanvasEdit ? file.content : file.content.slice(0, 30_000),
-      ...(canApplyCanvasEdit ? { canvasFileId: file.id } : {}),
+      ...(canApplyCanvasEdit ? { canvasFileId: file.id } : { canvasPartial: true }),
     });
-    if (!canApplyCanvasEdit) notify('Only the first 30 KB was attached; automatic edits require the full Canvas file under 100 KB.');
-    else notify(`${file.name} attached. Ask AIFLUX to edit it, then review the DIFF.`);
+    if (!canApplyCanvasEdit) notify(`AIFLUX can see the first 30 KB of ${file.name}, but not its full contents. Split or reduce the file for a safe full-file edit.`);
+    else notify(`AIFLUX can now see ${file.name}. Describe a change and send; this Canvas attachment stays active until you remove it.`);
     setMobileCanvasOpen(false);
     setView('studio');
   };

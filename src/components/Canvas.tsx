@@ -138,7 +138,7 @@ export default function Canvas(props: Props) {
         {mode === 'test' ? 'SAFE SANDBOX TEST' : mode === 'diff' ? 'DIFF · GREEN ADDED / RED DELETED' : file ? `${mode === 'view' ? 'READ-ONLY' : fileLanguage(file.name).toUpperCase()}  ·  ${lineCount} LINES` : 'NO FILE SELECTED'}
         <span className="canvas-bottom-right">AUTOSAVED LOCALLY</span>
       </div>
-      {file && mode !== 'test' && <button className="canvas-context-button" title={`Attach ${file.name} to chat so AIFLUX can edit it`} onClick={() => props.onAddContext(file)}><span><FileCode2 size={15} /> Edit {file.name.split('/').at(-1)} with AI</span><ArrowUpRight size={16} /></button>}
+      {file && mode !== 'test' && <button className="canvas-context-button" title={`Send the full ${file.name} contents to AIFLUX so it can read and edit this file`} onClick={() => props.onAddContext(file)}><span><FileCode2 size={15} /> Edit {file.name.split('/').at(-1)} with AI</span><ArrowUpRight size={16} /></button>}
       {mode === 'test' && <div className="preview-test-controls">
         <button type="button" className={remoteImagesAllowed ? 'remote-images-enabled' : ''} aria-pressed={remoteImagesAllowed} onClick={() => { setRemoteImagesAllowed((allowed) => !allowed); setRefresh((value) => value + 1); }} title="Allow only HTTPS image requests; the image host may see your IP address."><Globe2 size={13} /> Remote images {remoteImagesAllowed ? 'ON' : 'OFF'}</button>
         <span>{remoteImagesAllowed ? 'HTTPS images are enabled; hosts may see your IP. External scripts, fetch, and forms remain blocked.' : 'Off by default. Enable to load HTTPS images; inline/data images work without it.'}</span>

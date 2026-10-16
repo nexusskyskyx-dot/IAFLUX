@@ -25,6 +25,8 @@ export interface AttachedFile {
   content: string;
   /** Present only when this exact, full Canvas file was explicitly attached for an AI edit. */
   canvasFileId?: string;
+  /** Marks a Canvas attachment that contains only an excerpt because the full file is too large. */
+  canvasPartial?: boolean;
 }
 
 export interface ChatMessage {

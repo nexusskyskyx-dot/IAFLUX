@@ -49,6 +49,20 @@ test('the central capability profile covers shipped features and keeps identity 
   assert.match(prompt, /```html filename="index\.html"/);
 });
 
+test('Canvas attachment guidance tells models to inspect the selected file instead of asking which one', () => {
+  const attached = buildAssistantPrompt({ latestUserMessage: 'Please edit this.\n\nCanvas file attached for editing: index.html\n```text\n<h1>Current page</h1>\n```' });
+  assert.match(attached, /the full file "index\.html" is attached.*visible below/i);
+  assert.match(attached, /never ask which Canvas file/i);
+  assert.match(attached, /acknowledge the filename and ask only what change to make/i);
+
+  const missing = buildAssistantPrompt({ latestUserMessage: 'View the Canvas and edit.' });
+  assert.match(missing, /click “Edit <filename> with AI”/);
+
+  const partial = buildAssistantPrompt({ latestUserMessage: 'Canvas file attached for context only (partial): app.html\nfirst 30KB' });
+  assert.match(partial, /only a partial excerpt of "app\.html"/);
+  assert.match(partial, /cannot safely edit the whole file/i);
+});
+
 test('every provider includes the AIFLUX profile as a high-priority instruction on every turn', () => {
   for (const provider of Object.keys(models)) {
     const request = buildRequest(requestFor(provider), 'test-key', 'http://127.0.0.1:11434');

@@ -64,6 +64,22 @@ test('remote-image opt-in permits HTTPS image sources only while other network a
   assert.doesNotMatch(preview, /script-src https:/);
 });
 
+test('Canvas attachments are clearly labeled as visible edit targets and stale copies are removed from history', () => {
+  const result = toProviderMessages([
+    { role: 'user', content: 'Make this better', attachments: [{ name: 'index.html', content: '<h1>Old</h1>', canvasFileId: 'canvas-1' }] },
+    { role: 'assistant', content: 'I can see index.html. What should change?', status: 'done' },
+    { role: 'user', content: 'Make the hero more colorful', attachments: [{ name: 'index.html', content: '<h1>Current</h1>', canvasFileId: 'canvas-1' }] },
+  ]);
+  assert.doesNotMatch(result[0].content, /<h1>Old<\/h1>/);
+  assert.match(result[2].content, /Canvas file attached for editing: index\.html/);
+  assert.match(result[2].content, /complete current contents are included below/i);
+  assert.match(result[2].content, /<h1>Current<\/h1>/);
+
+  const partial = toProviderMessages([{ role: 'user', content: 'Review', attachments: [{ name: 'large.html', content: '<main>partial</main>', canvasPartial: true }] }]);
+  assert.match(partial[0].content, /Canvas file attached for context only \(partial\): large\.html/);
+  assert.match(partial[0].content, /cannot be safely applied as a full-file edit/);
+});
+
 test('conversation history includes attachments but skips failed assistant messages', () => {
   const result = toProviderMessages([
     { role: 'user', content: 'Review this', attachments: [{ name: 'test.py', content: 'print(1)' }] },

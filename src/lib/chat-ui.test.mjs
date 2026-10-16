@@ -54,6 +54,11 @@ test('chat displays the search mode, trusted source links, and honest skipped-se
     assert.doesNotMatch(html, /href="javascript:/);
     assert.doesNotMatch(html, /Unsafe link/);
     assert.match(html, /aria-label="Browse GitHub context"/);
+    const canvasContextHtml = renderToStaticMarkup(React.createElement(ChatPanel, {
+      ...props, contextFile: { name: 'index.html', content: '<h1>Current</h1>', canvasFileId: 'canvas-1' },
+    }));
+    assert.match(canvasContextHtml, /Canvas · index\.html/);
+    assert.match(canvasContextHtml, /Full Canvas file attached for editing/);
   } finally { await vite.close(); }
 });
 

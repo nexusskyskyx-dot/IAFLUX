@@ -1,4 +1,4 @@
-import type { ChatMessage, Conversation, WorkspaceFile } from '../types';
+import type { AttachedFile, ChatMessage, Conversation, WorkspaceFile } from '../types';
 
 export const STARTER_CODE = `<!DOCTYPE html>
 <html lang="en">
@@ -196,14 +196,34 @@ export function downloadConversation(conversation: Conversation) {
   downloadBlob(new Blob([text], { type: 'text/markdown;charset=utf-8' }), `${safeFilename(conversation.title.toLowerCase().replace(/\s+/g, '-'))}.md`);
 }
 
+function formatAttachmentForPrompt(file: AttachedFile): string {
+  if (file.canvasFileId) {
+    return `Canvas file attached for editing: ${file.name}\nThis is the user's selected Canvas file. Its complete current contents are included below. Read this file; if asked to edit it, return a complete replacement using this exact path.\n\`\`\`text filename="${file.name}"\n${file.content}\n\`\`\``;
+  }
+  if (file.canvasPartial) {
+    return `Canvas file attached for context only (partial): ${file.name}\nOnly the first 30 KB is included; this is not the complete file and cannot be safely applied as a full-file edit.\n\`\`\`text filename="${file.name}"\n${file.content}\n\`\`\``;
+  }
+  return `Attached file: ${file.name}\n\`\`\`\n${file.content}\n\`\`\``;
+}
+
 export function toProviderMessages(messages: ChatMessage[]): { role: 'user' | 'assistant'; content: string }[] {
   const usable = messages.filter((message) => message.role === 'user' || (message.content.trim() && message.status !== 'error'));
-  const results = usable.slice(-30).map((message) => ({
-    role: message.role,
-    content: message.content + (message.attachments?.length
-      ? '\n\n' + message.attachments.map((file) => `Attached file: ${file.name}\n\`\`\`\n${file.content}\n\`\`\``).join('\n\n')
-      : ''),
+  const recent = usable.slice(-30);
+  const latestCanvasAttachment = new Map<string, number>();
+  recent.forEach((message, index) => message.attachments?.forEach((file) => {
+    if (file.canvasFileId) latestCanvasAttachment.set(file.canvasFileId, index);
   }));
+  const results = recent.map((message, index) => {
+    const attachments = message.attachments?.filter((file) =>
+      !file.canvasFileId || latestCanvasAttachment.get(file.canvasFileId) === index,
+    ) || [];
+    return {
+      role: message.role,
+      content: message.content + (attachments.length
+        ? '\n\n' + attachments.map(formatAttachmentForPrompt).join('\n\n')
+        : ''),
+    };
+  });
   while (results.length > 1 && results.reduce((sum, message) => sum + message.content.length, 0) > 160_000) results.shift();
   while (results.length > 1 && results[0].role === 'assistant') results.shift();
   return results;
