@@ -47,7 +47,7 @@ function CodeBlock({ node, onOpenSnippet, onNotify }: { node: unknown; onOpenSni
   const language = code?.properties?.className?.join(' ')?.replace('language-', '') || 'code';
   const info = `${language} ${code?.data?.meta || ''}`.trim();
   const filename = info.match(/(?:filename|file|title)\s*=\s*["']?([^\s"']+)/i)?.[1];
-  if (language === 'aiflux-workspace') {
+  if (language === 'aiflux-workspace' || language === 'json') {
     try {
       const parsed = JSON.parse(content) as { operations?: { type?: string; path?: string; from?: string; to?: string }[] };
       const operations = Array.isArray(parsed.operations) ? parsed.operations.filter((operation) => operation && typeof operation === 'object').slice(0, 30) : [];

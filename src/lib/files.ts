@@ -74,6 +74,29 @@ export function fileColor(name: string): string {
   return 'muted';
 }
 
+function parseWorkspaceOperationsJson(value: string): { operations: unknown[] } | null {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || !('operations' in parsed) || !Array.isArray(parsed.operations)) return null;
+    return parsed as { operations: unknown[] };
+  } catch {
+    return null;
+  }
+}
+
+function locateWorkspaceOperationsPayload(markdown: string): { parsed: { operations: unknown[] }; block: string | null } | null {
+  const blocks = [...markdown.matchAll(/```([^\n]*)\n([\s\S]*?)```/g)];
+  for (const block of blocks) {
+    const language = block[1].trim();
+    if (language && !/^(?:aiflux-workspace|json)(?:\s|$)/i.test(language)) continue;
+    const parsed = parseWorkspaceOperationsJson(block[2]);
+    if (parsed) return { parsed, block: block[0] };
+  }
+  const trimmed = markdown.trim();
+  const parsed = parseWorkspaceOperationsJson(trimmed);
+  return parsed ? { parsed, block: null } : null;
+}
+
 export function extractCodeFiles(
   markdown: string,
   existing: WorkspaceFile[],
@@ -88,7 +111,7 @@ export function extractCodeFiles(
     let content = match[2].replace(/\n$/, '');
     if (!content.trim()) continue;
     const language = info.split(/\s+/)[0]?.replace(/^\./, '').toLowerCase() || 'text';
-    if (language === 'aiflux-workspace') continue;
+    if (language === 'aiflux-workspace' || parseWorkspaceOperationsJson(content)) continue;
     const filenameMatch = info.match(/(?:filename|file|title)\s*=\s*["']?([^\s"']+)/i);
     const colonMatch = info.match(/^\w+:([^\s]+)/);
     const commentMatch = content.match(/^(?:\/\/|#|<!--)\s*(?:file(?:name)?\s*:\s*)?([\w./-]+\.[a-z\d]+)(?:\s*-->)?\s*\n/i);
@@ -235,28 +258,31 @@ function safeWorkspacePath(value: unknown): string | null {
 }
 
 export function extractWorkspaceOperations(markdown: string): WorkspaceOperation[] {
-  const block = /```aiflux-workspace\s*\n([\s\S]*?)```/i.exec(markdown);
-  if (!block) return [];
-  try {
-    const parsed = JSON.parse(block[1]);
-    if (!parsed || !Array.isArray(parsed.operations)) return [];
-    return parsed.operations.slice(0, 30).flatMap((operation: Record<string, unknown>) => {
-      if (!operation || typeof operation !== 'object') return [];
-      const type = operation.type;
-      if (type === 'create-folder' || type === 'delete-folder' || type === 'delete-file') {
-        const path = safeWorkspacePath(operation.path);
-        return path ? [{ type, path } as WorkspaceOperation] : [];
-      }
-      if (type === 'rename-file' || type === 'rename-folder') {
-        const from = safeWorkspacePath(operation.from);
-        const to = safeWorkspacePath(operation.to);
-        return from && to && from !== to ? [{ type, from, to } as WorkspaceOperation] : [];
-      }
-      return [];
-    });
-  } catch {
+  const payload = locateWorkspaceOperationsPayload(markdown);
+  if (!payload) return [];
+  return payload.parsed.operations.slice(0, 30).flatMap((candidate) => {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return [];
+    const operation = candidate as Record<string, unknown>;
+    const type = operation.type;
+    if (type === 'create-folder' || type === 'delete-folder' || type === 'delete-file') {
+      const path = safeWorkspacePath(operation.path);
+      return path ? [{ type, path } as WorkspaceOperation] : [];
+    }
+    if (type === 'rename-file' || type === 'rename-folder') {
+      const from = safeWorkspacePath(operation.from);
+      const to = safeWorkspacePath(operation.to);
+      return from && to && from !== to ? [{ type, from, to } as WorkspaceOperation] : [];
+    }
     return [];
-  }
+  });
+}
+
+export function normalizeWorkspaceOperationOutput(markdown: string, operations: WorkspaceOperation[]): string {
+  if (!operations.length) return markdown;
+  const payload = locateWorkspaceOperationsPayload(markdown);
+  if (!payload) return markdown;
+  const actionBlock = `\`\`\`aiflux-workspace\n${JSON.stringify({ operations }, null, 2)}\n\`\`\``;
+  return payload.block ? markdown.replace(payload.block, actionBlock) : actionBlock;
 }
 
 function hasPositiveAction(text: string, pattern: RegExp): boolean {

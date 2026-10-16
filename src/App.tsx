@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDownToLine, Check, ChevronRight, Code2, KeyRound, Menu, PanelRightOpen } from 'lucide-react';
 import type { AppConfig, AttachedFile, ChatMessage, Conversation, Credentials, KeyProvider, ModelInfo, Provider, SearchMode, WorkspaceFile } from './types';
 import { CURATED_MODELS, DEFAULT_MODEL, PROVIDERS, recommendedModelForProvider } from './lib/models';
-import { applyWorkspaceOperations, buildCanvasContext, createDraft, downloadConversation, expandFolderPaths, extractCodeFiles, extractWorkspaceOperations, filterWorkspaceOperationsForRequest, inferFolderPaths, MAX_CANVAS_CONTEXT_CHARS, mergeGeneratedFiles, requestsCanvasMutation, toProviderMessages } from './lib/files';
+import { applyWorkspaceOperations, buildCanvasContext, createDraft, downloadConversation, expandFolderPaths, extractCodeFiles, extractWorkspaceOperations, filterWorkspaceOperationsForRequest, inferFolderPaths, MAX_CANVAS_CONTEXT_CHARS, mergeGeneratedFiles, normalizeWorkspaceOperationOutput, requestsCanvasMutation, toProviderMessages } from './lib/files';
 import { hasSavedModel, loadActiveId, loadConversations, loadCredentials, loadModel, loadSearchMode, saveActiveId, saveConversations, saveCredentials, saveModel, saveSearchMode } from './lib/storage';
 import { isUsableFreeCatalogModel } from './lib/model-policy.mjs';
 import { requestChat } from './lib/chat';
@@ -399,7 +399,7 @@ export default function App() {
         }
       },
     }).then(() => {
-      const text = responseText;
+      const rawText = responseText;
       const editableTargetMap = new Map((canvasMutationRequested ? canvasContext.editableFiles : []).map((target) => [target.id, target]));
       for (const attachment of userMessage.attachments || []) {
         if (canvasMutationRequested && attachment.canvasFileId && !editableTargetMap.has(attachment.canvasFileId)) {
@@ -407,7 +407,8 @@ export default function App() {
         }
       }
       const editableTargets = [...editableTargetMap.values()];
-      const workspaceOperations = filterWorkspaceOperationsForRequest(extractWorkspaceOperations(text), userRequestText);
+      const workspaceOperations = filterWorkspaceOperationsForRequest(extractWorkspaceOperations(rawText), userRequestText);
+      const text = normalizeWorkspaceOperationOutput(rawText, workspaceOperations);
       const latestConversation = chatsRef.current.find((chat) => chat.id === chatId) || updated;
       const latestGenerated = extractCodeFiles(text, latestConversation.files, editableTargets, canvasMutationRequested);
       const latestMerged = mergeGeneratedFiles(latestConversation.files, latestGenerated);

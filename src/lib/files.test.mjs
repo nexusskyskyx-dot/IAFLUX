@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applyWorkspaceOperations, buildCanvasContext, buildPreview, downloadProject, extractCodeFiles, extractWorkspaceOperations, filterWorkspaceOperationsForRequest, mergeGeneratedFiles, requestsCanvasMutation, safeFilename, toProviderMessages } from './files.ts';
+import { applyWorkspaceOperations, buildCanvasContext, buildPreview, downloadProject, extractCodeFiles, extractWorkspaceOperations, filterWorkspaceOperationsForRequest, mergeGeneratedFiles, normalizeWorkspaceOperationOutput, requestsCanvasMutation, safeFilename, toProviderMessages } from './files.ts';
 
 const file = (name, content, origin = 'user') => ({ id: name, name, content, origin });
 
@@ -84,6 +84,21 @@ test('AI workspace operations create, rename, and soft-delete files and folders 
   const operations = extractWorkspaceOperations(answer);
   assert.equal(operations.length, 5);
   assert.equal(extractCodeFiles(answer, files).length, 0);
+  const deleteJson = '{"operations":[{"type":"delete-file","path":"index.html"},{"type":"delete-file","path":"snippet-1.html"}]}';
+  const deleteOperations = extractWorkspaceOperations(deleteJson);
+  assert.deepEqual(deleteOperations.map((operation) => operation.type), ['delete-file', 'delete-file']);
+  const deleteResult = applyWorkspaceOperations([file('index.html', 'home'), file('snippet-1.html', 'sample')], [], [], [], filterWorkspaceOperationsForRequest(deleteOperations, 'Delete it'));
+  assert.equal(deleteResult.files.length, 0);
+  assert.deepEqual(deleteResult.deletedFiles.map((item) => item.name), ['index.html', 'snippet-1.html']);
+  const normalizedBare = normalizeWorkspaceOperationOutput(deleteJson, deleteOperations);
+  assert.match(normalizedBare, /^```aiflux-workspace/);
+  assert.equal(extractCodeFiles(normalizedBare, files).length, 0);
+  const fencedJson = `Here are the actions:\n\n\`\`\`json\n${deleteJson}\n\`\`\``;
+  assert.deepEqual(extractWorkspaceOperations(fencedJson), deleteOperations);
+  const normalizedFence = normalizeWorkspaceOperationOutput(fencedJson, deleteOperations);
+  assert.match(normalizedFence, /```aiflux-workspace/);
+  assert.doesNotMatch(normalizedFence, /```json/);
+  assert.equal(extractCodeFiles(fencedJson, files).length, 0);
   const result = applyWorkspaceOperations(files, ['empty'], [], [], operations);
   assert.deepEqual(result.files.map((item) => item.name), ['docs/guide.md']);
   assert.equal(result.deletedFiles[0].name, 'app/old.ts');
