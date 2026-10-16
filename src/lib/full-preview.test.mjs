@@ -80,9 +80,9 @@ test('the way out is labelled, not just another icon', () => {
   const html = render();
   // Three identical icon buttons gave no clue which one was the exit, so the
   // exit carries a word and its own styling, and the footer repeats the hint.
-  assert.match(html, /class="full-preview-exit"[^>]*>[\s\S]*?Exit/, 'it says "Exit"');
+  assert.match(html, /class="full-preview-exit"[^>]*>[\s\S]*?Exit full preview/, 'it says what it does');
   assert.match(html, /<kbd>Esc<\/kbd>/, 'and names the keyboard shortcut on the button');
-  assert.match(html, /Press <kbd>Esc<\/kbd> or use Exit to close/);
+  assert.match(html, /Press <kbd>Esc<\/kbd>, use Exit, or click the dark area/);
 
   const exit = html.match(/<button[^>]*class="full-preview-exit"[\s\S]*?<\/button>/)?.[0] || '';
   assert.ok(!/class="full-preview-icon"/.test(exit), 'the exit is not styled like the other two');

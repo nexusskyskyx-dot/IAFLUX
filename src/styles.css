@@ -295,6 +295,8 @@ a { color: inherit; }
    so forcing a colour here would paint deletions green. */
 .file-change-badge { flex: none; display: inline-flex; gap: 4px; padding: 1px 4px; border-radius: 4px; background: #2b2231; color: var(--muted); font-family: 'JetBrains Mono', monospace; font-size: 9px; }
 .canvas-tab-actions .diff-toggle-active { color: var(--accent); border-color: var(--accent); }
+.canvas-tab-actions .canvas-full-preview { display: inline-flex; align-items: center; gap: 5px; width: auto; height: 26px; padding: 0 9px; border: 1px solid #4c3b5b; border-radius: 7px; background: #2b1f33; color: #c9aee9; font-size: 9px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.canvas-tab-actions .canvas-full-preview:hover { background: #3e2d49; color: #e8d9ff; border-color: var(--accent); }
 
 .file-diff { display: flex; flex-direction: column; height: 100%; overflow: auto; }
 .file-diff-summary { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--line-subtle); color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
@@ -490,22 +492,25 @@ a { color: inherit; }
 
 /* Full preview: the page over the whole workspace, at the width it was made for. */
 .full-preview { position: fixed; inset: 0; z-index: 90; display: flex; flex-direction: column; background: #0d0a10; }
-.full-preview-bar { flex: none; display: flex; align-items: center; gap: 14px; height: 46px; padding: 0 12px; border-bottom: 1px solid #2b2231; background: #171220; }
+/* Wraps rather than overflowing: a bar whose right-hand controls are pushed
+   off a narrow window with no way to scroll to them is a bar with no
+   controls, which is exactly how this got reported. */
+.full-preview-bar { flex: none; display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; min-height: 52px; padding: 8px 12px; border-bottom: 1px solid #3a2f42; background: #191320; box-shadow: 0 6px 20px #0009; }
 .full-preview-title { display: inline-flex; align-items: center; gap: 7px; color: #c9aee9; font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; }
 .full-preview-devices { display: flex; gap: 4px; margin: 0 auto; padding: 3px; border-radius: 9px; background: #221a29; }
 .full-preview-devices button { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; border: 0; border-radius: 7px; background: transparent; color: #a197a9; font-size: 11px; font-family: 'JetBrains Mono', monospace; cursor: pointer; }
 .full-preview-devices button:hover { color: #e8d9ff; }
 .full-preview-devices button.active { background: #3a2b48; color: #e8d9ff; }
-.full-preview-actions { display: flex; gap: 4px; }
+.full-preview-actions { display: flex; gap: 6px; margin-left: auto; flex: none; }
 .full-preview-icon { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border: 1px solid #34283d; border-radius: 8px; background: #221a29; color: #c9aee9; cursor: pointer; }
 .full-preview-icon:hover { background: #3a2b48; color: #fff; border-color: var(--accent); }
 /* The way out, spelled out: unlike the two icon buttons beside it, this one
    says what it does, and it reads as an exit rather than as a third tool. */
-.full-preview-exit { display: inline-flex; align-items: center; gap: 7px; height: 32px; margin-left: 6px; padding: 0 12px; border: 1px solid #6d3a4f; border-radius: 8px; background: #33202b; color: #ffb9c8; font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; cursor: pointer; }
-.full-preview-exit:hover { background: #552535; border-color: #ff8b8b; color: #ffe3e9; }
+.full-preview-exit { display: inline-flex; align-items: center; gap: 7px; height: 36px; padding: 0 14px; border: 1px solid #ff8b8b66; border-radius: 9px; background: #4a1f2e; color: #ffd9e0; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; cursor: pointer; }
+.full-preview-exit:hover { background: #6d2b40; border-color: #ff8b8b; color: #fff; }
 .full-preview-exit kbd, .full-preview-foot kbd { display: inline-block; padding: 1px 5px; border: 1px solid currentColor; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 9px; opacity: .75; }
 .full-preview-stage { flex: 1; display: flex; justify-content: center; min-height: 0; padding: 14px; background: #0d0a10; }
 .full-preview-frame { display: flex; width: 100%; max-width: 100%; height: 100%; }
 .full-preview-frame iframe { display: block; width: 100%; height: 100%; border: 0; border-radius: 8px; background: #fff; box-shadow: 0 18px 50px #0008; }
 .full-preview-foot { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 14px; border-top: 1px solid #2b2231; background: #171220; color: #897a94; font-size: 10px; }
-@media (max-width: 720px) { .full-preview-devices { margin: 0; } .full-preview-title span, .full-preview-devices button { font-size: 10px; } .full-preview-foot span:last-child { display: none; } .full-preview-exit kbd { display: none; } .full-preview-title { display: none; } }
+@media (max-width: 720px) { .full-preview-devices { margin: 0; order: 3; width: 100%; justify-content: center; } .full-preview-devices button { font-size: 10px; } .full-preview-foot span:last-child { display: none; } .full-preview-exit kbd { display: none; } .full-preview-title { display: none; } .full-preview-stage { padding: 8px; } }

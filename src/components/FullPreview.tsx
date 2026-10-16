@@ -75,12 +75,15 @@ export function FullPreviewPanel({ preview, device, onDevice, onRefresh, onClose
             icon buttons gave no clue which one was the way out, and a preview
             you cannot find your way out of is a trap. */}
         <button ref={closeRef} onClick={onClose} className="full-preview-exit" title="Exit full preview (Esc)" aria-label="Exit full preview (Esc)">
-          <X size={15} />Exit<kbd>Esc</kbd>
+          <X size={16} />Exit full preview<kbd>Esc</kbd>
         </button>
       </div>
     </div>
 
-    <div className="full-preview-stage">
+    {/* The dark area around the page is a way out too. When a width is chosen
+        it is most of the screen, which makes it hard to miss even if the bar
+        itself was never spotted. */}
+    <div className="full-preview-stage" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <div className="full-preview-frame" style={width ? { width: `${width}px` } : undefined}>
         {/* Keyed on the reload counter only: changing width must not restart the
             page, or you lose wherever you had scrolled to. */}
@@ -90,7 +93,7 @@ export function FullPreviewPanel({ preview, device, onDevice, onRefresh, onClose
 
     <div className="full-preview-foot">
       <span>{width ? `${width}px — the layout at this width is what a visitor on that device sees.` : 'Filling the window.'}</span>
-      <span>Press <kbd>Esc</kbd> or use Exit to close · Sandboxed: no network, no access to your workspace.</span>
+      <span>Press <kbd>Esc</kbd>, use Exit, or click the dark area around the page · Sandboxed: no network, no access to your workspace.</span>
     </div>
   </div>;
 }
