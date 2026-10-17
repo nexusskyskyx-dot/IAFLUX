@@ -99,6 +99,8 @@ Two environment variables swap where live search goes:
 
 Neither is required: without `XWEB_BASE`, search calls Tavily directly as before. When it is set, **the key a user already keeps in Settings is sent along as `X-XWeb-Key`**, which is where x-web accepts a provider key. It is also where it accepts an **x-web account key**, and that is the easier path: sign in to the x-web dashboard, save a provider key there once, then paste only your x-web key into AIFLUX — searches run on the credentials saved to your x-web account, and one key reaches all four providers. A provider key pasted straight into Settings works just as well. A rejected key is reported with both cures, because only one of them lives in AIFLUX. So no new key has to be issued to go from one index to four.
 
+The key box lives under **LIVE WEB SEARCH** in Settings, below the four AI provider blocks — past the fold of a modal capped in height, which is why it read as missing. The modal now carries a "Scroll for web search" cue that fades once the end is reached.
+
 The Settings field follows the backend rather than assuming one: with `XWEB_BASE` set it says **x-web search**, explains that one key reaches all four providers, and links to x-web instead of Tavily. `/api/config` reports `searchBackend` and counts a server-side x-web key as `searchConfigured`, so "works without entering anything" stays true whichever way it is wired.
 
 Copy `.env.example` and set any combination of these values:

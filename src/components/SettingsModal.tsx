@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { ArrowUpRight, Check, Eye, EyeOff, Globe2, KeyRound, LockKeyhole, ShieldCheck, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { ArrowUpRight, Check, ChevronDown, Eye, EyeOff, Globe2, KeyRound, LockKeyhole, ShieldCheck, X } from 'lucide-react';
 import type { AppConfig, Credentials, Provider } from '../types';
 import { PROVIDERS } from '../lib/models';
 import { ProviderIcon } from './Brand';
@@ -16,6 +16,22 @@ export default function SettingsModal({ credentials, config, focusProvider, onSa
   // The box takes whatever key the configured backend accepts, so the copy has
   // to name that backend rather than the one it used to be hard-wired to.
   const viaXWeb = config.searchBackend === 'x-web';
+  // The web-search block sits below four provider blocks, which pushes it past
+  // the fold of a modal that is capped at 780px. It has always been there, and
+  // it has always been invisible. Say there is more rather than relying on
+  // someone thinking to scroll.
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [moreBelow, setMoreBelow] = useState(false);
+  useEffect(() => {
+    const node = bodyRef.current;
+    if (!node) return;
+    const update = () => setMoreBelow(node.scrollHeight - node.scrollTop - node.clientHeight > 12);
+    update();
+    node.addEventListener('scroll', update, { passive: true });
+    const observer = new ResizeObserver(update);
+    observer.observe(node);
+    return () => { node.removeEventListener('scroll', update); observer.disconnect(); };
+  }, []);
   const [draft, setDraft] = useState<Credentials>(() => ({ ...credentials, keys: { ...credentials.keys } }));
   const [visible, setVisible] = useState<Provider | 'access' | 'search' | null>(null);
   useEffect(() => {
@@ -31,7 +47,8 @@ export default function SettingsModal({ credentials, config, focusProvider, onSa
         <div><div className="eyebrow">YOUR CONNECTIONS</div><h2 id="settings-title">Make it yours<span>.</span></h2><p>Bring a key from a free-tier provider to start creating.</p></div>
         <button className="icon-button settings-close" onClick={onClose} aria-label="Close settings"><X size={20} /></button>
       </div>
-      <div className="settings-body">
+      <div className="settings-body-wrap">
+        <div className="settings-body" ref={bodyRef}>
         <div className="settings-section-heading"><span>AI PROVIDERS</span><span>01 — 04</span></div>
         {providers.map((provider) => <div key={provider} className={`settings-provider ${focusProvider === provider ? 'settings-provider-focus' : ''}`}>
           <ProviderIcon provider={provider} />
@@ -66,8 +83,10 @@ export default function SettingsModal({ credentials, config, focusProvider, onSa
         <div className="settings-local-note"><span className="settings-local-icon">◉</span><div><strong>Prefer to keep it local?</strong><p>Set <code>OLLAMA_BASE_URL</code> on the server to discover your installed Ollama models. No API key needed.</p></div></div>
         {config.requiresAccessCode && <div className="settings-access"><label htmlFor="access-code"><LockKeyhole size={16} /> Workspace access code</label><div className="settings-key-row"><input id="access-code" type={visible === 'access' ? 'text' : 'password'} value={draft.accessCode} onChange={(event) => setDraft((previous) => ({ ...previous, accessCode: event.target.value }))} placeholder="Enter the code from your workspace owner" autoComplete="off" /><button aria-label="Show or hide access code" onClick={() => setVisible(visible === 'access' ? null : 'access')}>{visible === 'access' ? <EyeOff size={16} /> : <Eye size={16} />}</button></div></div>}
         <label className="settings-remember"><input type="checkbox" checked={draft.remember} onChange={(event) => setDraft((previous) => ({ ...previous, remember: event.target.checked }))} /><span className="checkbox-ui"><Check size={13} /></span><span><strong>Remember on this device</strong><small>Off by default. Otherwise keys last only for this browser tab.</small></span></label>
+        </div>
+        <div className={`settings-more-hint ${moreBelow ? '' : 'is-gone'}`} aria-hidden="true"><ChevronDown size={13} /> Scroll for web search</div>
       </div>
-      <div className="settings-footer"><div><ShieldCheck size={17} /><span>Keys go to your AIFLUX server, then only to the selected AI provider or Tavily search. Never shared with other users.</span></div><button className="primary-button" onClick={() => onSave({ ...draft, keys: Object.fromEntries(Object.entries(draft.keys).map(([provider, key]) => [provider, key.trim()])) as Credentials['keys'], accessCode: draft.accessCode.trim(), searchKey: draft.searchKey.trim() })}>Save connections <ArrowUpRight size={17} /></button></div>
+      <div className="settings-footer"><div><ShieldCheck size={17} /><span>Keys go to your AIFLUX server, then only to the selected AI provider or the web search backend. Never shared with other users.</span></div><button className="primary-button" onClick={() => onSave({ ...draft, keys: Object.fromEntries(Object.entries(draft.keys).map(([provider, key]) => [provider, key.trim()])) as Credentials['keys'], accessCode: draft.accessCode.trim(), searchKey: draft.searchKey.trim() })}>Save connections <ArrowUpRight size={17} /></button></div>
     </div>
   </div>;
 }

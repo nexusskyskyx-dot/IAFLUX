@@ -73,6 +73,10 @@ test('settings explain optional keyless search and offer a private key field', a
     assert.match(html, /Optional Tavily API key/);
     assert.match(html, /type="password"[^>]*aria-label="Web search API key"/);
     assert.match(html, /query goes to Tavily/);
+    // This block sits below four provider blocks in a modal capped at 780px, so
+    // it has always been past the fold. The modal now says there is more.
+    assert.match(html, /Scroll for web search/, 'a cue that something is below the fold');
+    assert.match(html, /the web search backend/, 'and the footer no longer promises Tavily regardless');
   } finally { await vite.close(); }
 });
 
