@@ -13,6 +13,9 @@ interface Props {
 }
 
 export default function SettingsModal({ credentials, config, focusProvider, onSave, onClose }: Props) {
+  // The box takes whatever key the configured backend accepts, so the copy has
+  // to name that backend rather than the one it used to be hard-wired to.
+  const viaXWeb = config.searchBackend === 'x-web';
   const [draft, setDraft] = useState<Credentials>(() => ({ ...credentials, keys: { ...credentials.keys } }));
   const [visible, setVisible] = useState<Provider | 'access' | 'search' | null>(null);
   useEffect(() => {
@@ -46,14 +49,18 @@ export default function SettingsModal({ credentials, config, focusProvider, onSa
         <div className="settings-provider settings-search-provider">
           <span className="settings-search-icon"><Globe2 size={19} /></span>
           <div className="settings-provider-content">
-            <div className="settings-provider-title"><strong>Tavily web search</strong>{config.searchConfigured && !draft.searchKey ? <span className="settings-env-tag"><Check size={11} /> Workspace key</span> : draft.searchKey ? <span className="settings-connected-tag"><span /> Your key</span> : <span className="settings-env-tag">Keyless available</span>}</div>
-            <p>Search the live web in chat. Keyless access works without signup but has shared rate limits. An optional Tavily key can provide your own free monthly allowance.</p>
+            <div className="settings-provider-title"><strong>{viaXWeb ? 'x-web search' : 'Tavily web search'}</strong>{config.searchConfigured && !draft.searchKey ? <span className="settings-env-tag"><Check size={11} /> Workspace key</span> : draft.searchKey ? <span className="settings-connected-tag"><span /> Your key</span> : <span className="settings-env-tag">Keyless available</span>}</div>
+            <p>{viaXWeb
+              ? 'Search the live web in chat through x-web: one key reaches Tavily, Brave Search, Serper and Exa, blended into one result set. An x-web account key works here, and so does a key from any of those providers.'
+              : 'Search the live web in chat. Keyless access works without signup but has shared rate limits. An optional Tavily key can provide your own free monthly allowance.'}</p>
             <div className="settings-key-row">
-              <input type={visible === 'search' ? 'text' : 'password'} value={draft.searchKey} onChange={(event) => setDraft((previous) => ({ ...previous, searchKey: event.target.value }))} placeholder={config.searchConfigured ? 'Using workspace key · add yours to override' : 'Optional Tavily API key'} aria-label="Tavily search API key" autoComplete="off" spellCheck={false} />
-              <button aria-label={`${visible === 'search' ? 'Hide' : 'Show'} Tavily search key`} onClick={() => setVisible(visible === 'search' ? null : 'search')}>{visible === 'search' ? <EyeOff size={16} /> : <Eye size={16} />}</button>
+              <input type={visible === 'search' ? 'text' : 'password'} value={draft.searchKey} onChange={(event) => setDraft((previous) => ({ ...previous, searchKey: event.target.value }))} placeholder={config.searchConfigured ? 'Using workspace key · add yours to override' : viaXWeb ? 'x-web key, or a Tavily / Brave / Serper / Exa key' : 'Optional Tavily API key'} aria-label="Web search API key" autoComplete="off" spellCheck={false} />
+              <button aria-label={`${visible === 'search' ? 'Hide' : 'Show'} web search key`} onClick={() => setVisible(visible === 'search' ? null : 'search')}>{visible === 'search' ? <EyeOff size={16} /> : <Eye size={16} />}</button>
             </div>
-            <a href="https://app.tavily.com/" target="_blank" rel="noreferrer">Get a free Tavily key <ArrowUpRight size={13} /></a>
-            <p className="settings-search-privacy">When search runs, its query goes to Tavily. Avoid including private code or personal data in questions you search.</p>
+            {viaXWeb
+              ? <a href="https://x-web-gamma.vercel.app/login" target="_blank" rel="noreferrer">Get an x-web key <ArrowUpRight size={13} /></a>
+              : <a href="https://app.tavily.com/" target="_blank" rel="noreferrer">Get a free Tavily key <ArrowUpRight size={13} /></a>}
+            <p className="settings-search-privacy">When search runs, its query goes to {viaXWeb ? 'the x-web search backend' : 'Tavily'}. Avoid including private code or personal data in questions you search.</p>
           </div>
         </div>
         <div className="settings-local-note"><span className="settings-local-icon">◉</span><div><strong>Prefer to keep it local?</strong><p>Set <code>OLLAMA_BASE_URL</code> on the server to discover your installed Ollama models. No API key needed.</p></div></div>

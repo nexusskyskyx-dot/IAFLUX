@@ -61,7 +61,7 @@ test('chat displays the search mode, trusted source links, and honest skipped-se
   } finally { await vite.close(); }
 });
 
-test('settings explain optional keyless Tavily search and offer a private key field', async () => {
+test('settings explain optional keyless search and offer a private key field', async () => {
   const vite = await createServer({ configFile: false, appType: 'custom', optimizeDeps: { noDiscovery: true, include: [] }, server: { middlewareMode: true } });
   try {
     const { default: SettingsModal } = await vite.ssrLoadModule('/src/components/SettingsModal.tsx');
@@ -71,8 +71,27 @@ test('settings explain optional keyless Tavily search and offer a private key fi
     assert.match(html, /LIVE WEB SEARCH/);
     assert.match(html, /Keyless available/);
     assert.match(html, /Optional Tavily API key/);
-    assert.match(html, /type="password"[^>]*aria-label="Tavily search API key"/);
+    assert.match(html, /type="password"[^>]*aria-label="Web search API key"/);
     assert.match(html, /query goes to Tavily/);
+  } finally { await vite.close(); }
+});
+
+test('settings name x-web when that is the backend the workspace is using', async () => {
+  // The box takes whatever key the configured backend accepts. An x-web key is
+  // not a Tavily key, and telling someone it is sends them to the wrong signup
+  // page to get one.
+  const vite = await createServer({ configFile: false, appType: 'custom', optimizeDeps: { noDiscovery: true, include: [] }, server: { middlewareMode: true } });
+  try {
+    const { default: SettingsModal } = await vite.ssrLoadModule('/src/components/SettingsModal.tsx');
+    const credentials = { keys: { openrouter: '', gemini: 'model-key', groq: '' }, accessCode: '', searchKey: '', remember: false };
+    const config = { configured: { openrouter: false, gemini: false, groq: false }, ollamaConfigured: false, searchConfigured: false, searchBackend: 'x-web', requiresAccessCode: false };
+    const html = renderToStaticMarkup(React.createElement(SettingsModal, { credentials, config, onSave() {}, onClose() {} }));
+    assert.match(html, /x-web search/);
+    assert.match(html, /one key reaches Tavily, Brave Search, Serper and Exa/, 'saying what one key actually buys');
+    assert.match(html, /x-web key, or a Tavily \/ Brave \/ Serper \/ Exa key/, 'and what may be pasted in');
+    assert.match(html, /Get an x-web key/, 'linking to the right signup');
+    assert.match(html, /query goes to the x-web search backend/);
+    assert.doesNotMatch(html, /Optional Tavily API key/, 'without the old Tavily-only copy');
   } finally { await vite.close(); }
 });
 

@@ -7,7 +7,7 @@ import {
   readSSE, readLines, extractChunk, getFreeOpenRouterModels,
   getFreeXkiroModels, getXkiroFreeCatalog, xkiroCatalogIsFresh,
 } from './providers.mjs';
-import { planWebSearch, searchWeb, withSearchContext } from './search.mjs';
+import { planWebSearch, searchBackend, searchWeb, withSearchContext } from './search.mjs';
 import { createFileOpParser } from './file-ops.mjs';
 import { browse, describeBrowse, BrowseError } from './browse.mjs';
 import { isDesignRequest } from './design-profile.mjs';
@@ -62,7 +62,10 @@ app.get('/api/config', (_req, res) => {
   res.json({
     configured: Object.fromEntries(Object.entries(envKeys).map(([provider, key]) => [provider, Boolean(key)])),
     ollamaConfigured: Boolean(ollamaBaseUrl),
-    searchConfigured: Boolean(envSearchKey),
+    // Works without a key in Settings either because a Tavily key is on the
+    // server or because the x-web deployment has one configured.
+    searchConfigured: Boolean(envSearchKey) || searchBackend.hasServerKey,
+    searchBackend: searchBackend.kind,
     requiresAccessCode: Boolean(accessCode),
   });
 });

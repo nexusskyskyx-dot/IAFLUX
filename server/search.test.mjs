@@ -178,3 +178,25 @@ test('an x-web refusal is reported in the user\'s words', async (t) => {
   await assert.rejects(fail(429, { error: { message: 'Slow down.' } }), /rate limit.*Slow down/s);
   await assert.rejects(fail(402, { error: { message: 'Out of credit.' } }), /out of credit/s);
 });
+
+test('the settings screen is told which backend it is configuring', async (t) => {
+  // The key box takes whatever the configured backend accepts, so the copy has
+  // to name that backend. An x-web key is not a Tavily key and saying so sends
+  // people to the wrong signup page.
+  const savedBase = process.env.XWEB_BASE;
+  const savedKey = process.env.XWEB_KEY;
+  t.after(() => {
+    for (const [name, value] of [['XWEB_BASE', savedBase], ['XWEB_KEY', savedKey]]) {
+      if (value === undefined) delete process.env[name]; else process.env[name] = value;
+    }
+  });
+  delete process.env.XWEB_BASE;
+  delete process.env.XWEB_KEY;
+  assert.deepEqual((await import(`./search.mjs?a=${Date.now()}`)).searchBackend, { kind: 'tavily', hasServerKey: false });
+
+  process.env.XWEB_BASE = 'https://x-web.example';
+  assert.deepEqual((await import(`./search.mjs?b=${Date.now()}`)).searchBackend, { kind: 'x-web', hasServerKey: false }, 'named, whether or not a key is on the server');
+
+  process.env.XWEB_KEY = 'xweb-account-key';
+  assert.deepEqual((await import(`./search.mjs?c=${Date.now()}`)).searchBackend, { kind: 'x-web', hasServerKey: true }, 'and a server key means search runs with nothing in Settings');
+});

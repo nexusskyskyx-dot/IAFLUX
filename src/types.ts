@@ -105,6 +105,8 @@ export interface AppConfig {
   configured: Record<'openrouter' | 'gemini' | 'groq' | 'xkiro', boolean>;
   ollamaConfigured: boolean;
   searchConfigured: boolean;
+  /** Which search backend the workspace uses, so the Settings copy can be true. */
+  searchBackend?: 'x-web' | 'tavily';
   requiresAccessCode: boolean;
 }
 

@@ -20,6 +20,11 @@ test('Vercel functions route to the shared API instead of returning SPA HTML', a
     const config = await response.json();
     assert.equal(typeof config.configured.openrouter, 'boolean');
     assert.equal(typeof config.searchConfigured, 'boolean');
+    // The key box takes whatever the configured backend accepts, so the copy
+    // has to name it. searchConfigured answers "will search work with nothing
+    // entered in Settings", which is as true of a server x-web key as of a
+    // server Tavily key, so both count.
+    assert.ok(['x-web', 'tavily'].includes(config.searchBackend), 'the backend is named, so the Settings copy can be true');
     const denied = await fetch(`${base}/api/chat`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ provider: 'openrouter', model: 'openai/paid', messages: [{ role: 'user', content: 'hi' }] }),

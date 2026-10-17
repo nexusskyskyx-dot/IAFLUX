@@ -97,7 +97,9 @@ Two environment variables swap where live search goes:
 | `XWEB_BASE` | A [x-web](https://github.com/nexusskyskyx-dot/x-web) deployment URL. Searches go through it, which puts Tavily, Brave Search, Serper and Exa behind one API and blends them into one deduplicated, reranked list. |
 | `XWEB_KEY` | Optional. A provider or x-web account key held on the server, so search runs with nothing entered in Settings. |
 
-Neither is required: without `XWEB_BASE`, search calls Tavily directly as before. When it is set, **the Tavily key a user already keeps in Settings is sent along** — x-web takes exactly that in `X-XWeb-Key` — so no new key has to be issued to go from one index to four.
+Neither is required: without `XWEB_BASE`, search calls Tavily directly as before. When it is set, **the key a user already keeps in Settings is sent along as `X-XWeb-Key`**, which is where x-web accepts a provider key — and where it accepts an x-web account key, whose search then runs on the deployment's own provider key. So no new key has to be issued to go from one index to four.
+
+The Settings field follows the backend rather than assuming one: with `XWEB_BASE` set it says **x-web search**, explains that one key reaches all four providers, and links to x-web instead of Tavily. `/api/config` reports `searchBackend` and counts a server-side x-web key as `searchConfigured`, so "works without entering anything" stays true whichever way it is wired.
 
 Copy `.env.example` and set any combination of these values:
 

@@ -19,6 +19,14 @@ const SEARCH_URL = 'https://api.tavily.com/search';
 const XWEB_BASE = (process.env.XWEB_BASE || '').replace(/\/$/, '');
 const XWEB_KEY = process.env.XWEB_KEY || '';
 
+/** Where search goes, for the Settings screen. Nothing here is a secret. */
+export const searchBackend = Object.freeze({
+  /** 'x-web' when a deployment is configured, otherwise 'tavily'. */
+  kind: XWEB_BASE ? 'x-web' : 'tavily',
+  /** True when a key lives on the server, so search runs with nothing in Settings. */
+  hasServerKey: Boolean(XWEB_KEY),
+});
+
 /** The x-web error envelope, so a refusal can be reported in the user's words. */
 function xWebMessage(status, body) {
   const detail = body?.error?.message ? ` ${body.error.message}` : '';
