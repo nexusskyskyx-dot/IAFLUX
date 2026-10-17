@@ -51,10 +51,10 @@ export default function SettingsModal({ credentials, config, focusProvider, onSa
           <div className="settings-provider-content">
             <div className="settings-provider-title"><strong>{viaXWeb ? 'x-web search' : 'Tavily web search'}</strong>{config.searchConfigured && !draft.searchKey ? <span className="settings-env-tag"><Check size={11} /> Workspace key</span> : draft.searchKey ? <span className="settings-connected-tag"><span /> Your key</span> : <span className="settings-env-tag">Keyless available</span>}</div>
             <p>{viaXWeb
-              ? 'Search the live web in chat through x-web: one key reaches Tavily, Brave Search, Serper and Exa, blended into one result set. An x-web account key works here, and so does a key from any of those providers.'
+              ? 'Search the live web in chat through x-web. Paste the key from your x-web dashboard and it searches with the provider key you saved there: one key reaches Tavily, Brave Search, Serper and Exa. A provider key pasted here directly works too.'
               : 'Search the live web in chat. Keyless access works without signup but has shared rate limits. An optional Tavily key can provide your own free monthly allowance.'}</p>
             <div className="settings-key-row">
-              <input type={visible === 'search' ? 'text' : 'password'} value={draft.searchKey} onChange={(event) => setDraft((previous) => ({ ...previous, searchKey: event.target.value }))} placeholder={config.searchConfigured ? 'Using workspace key · add yours to override' : viaXWeb ? 'x-web key, or a Tavily / Brave / Serper / Exa key' : 'Optional Tavily API key'} aria-label="Web search API key" autoComplete="off" spellCheck={false} />
+              <input type={visible === 'search' ? 'text' : 'password'} value={draft.searchKey} onChange={(event) => setDraft((previous) => ({ ...previous, searchKey: event.target.value }))} placeholder={config.searchConfigured ? 'Using workspace key · add yours to override' : viaXWeb ? 'Your x-web key, or a Tavily / Brave / Serper / Exa key' : 'Optional Tavily API key'} aria-label="Web search API key" autoComplete="off" spellCheck={false} />
               <button aria-label={`${visible === 'search' ? 'Hide' : 'Show'} web search key`} onClick={() => setVisible(visible === 'search' ? null : 'search')}>{visible === 'search' ? <EyeOff size={16} /> : <Eye size={16} />}</button>
             </div>
             {viaXWeb

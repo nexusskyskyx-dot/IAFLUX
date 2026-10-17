@@ -89,6 +89,7 @@ test('settings name x-web when that is the backend the workspace is using', asyn
     assert.match(html, /x-web search/);
     assert.match(html, /one key reaches Tavily, Brave Search, Serper and Exa/, 'saying what one key actually buys');
     assert.match(html, /x-web key, or a Tavily \/ Brave \/ Serper \/ Exa key/, 'and what may be pasted in');
+    assert.match(html, /searches with the provider key you saved there/, 'describing the dashboard flow, which is the easy path');
     assert.match(html, /Get an x-web key/, 'linking to the right signup');
     assert.match(html, /query goes to the x-web search backend/);
     assert.doesNotMatch(html, /Optional Tavily API key/, 'without the old Tavily-only copy');

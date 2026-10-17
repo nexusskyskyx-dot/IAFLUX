@@ -30,7 +30,10 @@ export const searchBackend = Object.freeze({
 /** The x-web error envelope, so a refusal can be reported in the user's words. */
 function xWebMessage(status, body) {
   const detail = body?.error?.message ? ` ${body.error.message}` : '';
-  if (status === 401 || status === 403) return `The search key was rejected.${detail} Update it in Settings or clear it.`;
+  // Only reached when x-web is the backend, so the dashboard is a real answer:
+  // a rejected key may mean the provider key saved there is missing or spent,
+  // which no amount of editing in Settings will fix.
+  if (status === 401 || status === 403) return `The search key was rejected.${detail} Check it in Settings — or save a provider key in your x-web dashboard and use your x-web key instead.`;
   if (status === 429) return `Web search reached a rate limit.${detail} Try later.`;
   if (status === 402) return `The search provider is out of credit.${detail}`;
   return `The web search service is unavailable.${detail}`;

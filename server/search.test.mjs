@@ -174,7 +174,7 @@ test('an x-web refusal is reported in the user\'s words', async (t) => {
   const fail = (status, body) => module.searchWeb('best landing page design', 'k', {
     fetchImpl: async () => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } }),
   });
-  await assert.rejects(fail(401, { error: { type: 'authentication_error', message: 'No provider key supplied.' } }), /search key was rejected.*No provider key supplied/s);
+  await assert.rejects(fail(401, { error: { type: 'authentication_error', message: 'No provider key supplied.' } }), /search key was rejected.*No provider key supplied.*save a provider key in your x-web dashboard/s, 'pointing at both cures, since only one lives in AIFLUX');
   await assert.rejects(fail(429, { error: { message: 'Slow down.' } }), /rate limit.*Slow down/s);
   await assert.rejects(fail(402, { error: { message: 'Out of credit.' } }), /out of credit/s);
 });
