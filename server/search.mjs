@@ -2,30 +2,22 @@ import { buildRequest, friendlyUpstreamError, RequestError } from './providers.m
 import { buildAssistantPrompt } from './assistant-profile.mjs';
 import { isNonChatModelId } from '../src/lib/model-policy.mjs';
 
-const SEARCH_URL = 'https://api.tavily.com/search';
-
 /**
- * x-web: one search API over Tavily, Brave Search, Serper and Exa.
+ * x-web is the search backend: one API over Tavily, Brave Search, Serper and
+ * Exa, queried together and blended into one deduplicated list. See
+ * github.com/nexusskyskyx-dot/x-web.
  *
- * Set XWEB_BASE to a deployment (see github.com/nexusskyskyx-dot/x-web) and
- * searches go through it instead of straight to one provider. The key the user
- * already keeps in Settings is a provider key, and x-web takes exactly that in
- * X-XWeb-Key, so nothing has to be re-plumbed: the same key buys four indexes
- * and a blended, deduplicated result set instead of one.
- *
- * XWEB_KEY is for a deployment where the provider key lives on the server, or
- * for an x-web account key, so a search can run with nothing in Settings.
+ * The base URL defaults to the public deployment so search works with no
+ * configuration at all, and XWEB_BASE overrides it — worth doing, since a
+ * Vercel preview hostname can change and this is the one thing that would
+ * then break silently.
  */
-const XWEB_BASE = (process.env.XWEB_BASE || '').replace(/\/$/, '');
+const DEFAULT_XWEB_BASE = 'https://x-web-gamma.vercel.app';
+const XWEB_BASE = (process.env.XWEB_BASE || DEFAULT_XWEB_BASE).replace(/\/$/, '');
 const XWEB_KEY = process.env.XWEB_KEY || '';
 
-/** Where search goes, for the Settings screen. Nothing here is a secret. */
-export const searchBackend = Object.freeze({
-  /** 'x-web' when a deployment is configured, otherwise 'tavily'. */
-  kind: XWEB_BASE ? 'x-web' : 'tavily',
-  /** True when a key lives on the server, so search runs with nothing in Settings. */
-  hasServerKey: Boolean(XWEB_KEY),
-});
+/** True when a key lives on the server, so search runs with nothing in Settings. */
+export const searchHasServerKey = Boolean(XWEB_KEY);
 
 /** The x-web error envelope, so a refusal can be reported in the user's words. */
 function xWebMessage(status, body) {
@@ -34,7 +26,7 @@ function xWebMessage(status, body) {
   // a rejected key may mean the provider key saved there is missing or spent,
   // which no amount of editing in Settings will fix.
   if (status === 401 || status === 403) return `The search key was rejected.${detail} Check it in Settings — or save a provider key in your x-web dashboard and use your x-web key instead.`;
-  if (status === 429) return `Web search reached a rate limit.${detail} Try later.`;
+  if (status === 429) return `Web search reached a rate limit.${detail} Try later, or add your own key in Settings.`;
   if (status === 402) return `The search provider is out of credit.${detail}`;
   return `The web search service is unavailable.${detail}`;
 }
@@ -185,40 +177,27 @@ export async function searchWeb(query, key = '', { signal, fetchImpl = fetch } =
   const timeout = AbortSignal.any([AbortSignal.timeout(12_000), ...(signal ? [signal] : [])]);
   let response;
   try {
-    response = XWEB_BASE
-      ? await fetchImpl(`${XWEB_BASE}/api/v1/search`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(key || XWEB_KEY ? { 'X-XWeb-Key': key || XWEB_KEY } : {}) },
-        body: JSON.stringify({
-          query: safeQuery,
-          max_results: 5,
-          include_answer: false,
-          // The reason to use it at all: every configured provider is queried
-          // at once, then deduplicated and reranked into one list.
-          multi_source: true,
-        }),
-        signal: timeout,
-      })
-      : await fetchImpl(SEARCH_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(key ? { Authorization: `Bearer ${key}` } : { 'X-Tavily-Access-Mode': 'keyless' }) },
-        body: JSON.stringify({ query: safeQuery, search_depth: 'basic', max_results: 5, include_answer: false, include_raw_content: false, include_images: false, include_published_date: true, safe_search: true }),
-        signal: timeout,
-      });
+    response = await fetchImpl(`${XWEB_BASE}/api/v1/search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(key || XWEB_KEY ? { 'X-XWeb-Key': key || XWEB_KEY } : {}) },
+      body: JSON.stringify({
+        query: safeQuery,
+        max_results: 5,
+        include_answer: false,
+        // The reason to use it at all: every configured provider is queried at
+        // once, then deduplicated and reranked into one list.
+        multi_source: true,
+      }),
+      signal: timeout,
+    });
   } catch (error) {
     if (signal?.aborted) throw error;
     throw new RequestError(502, 'Live web search is unavailable. Try again or switch Search off.');
   }
   if (!response.ok) {
-    if (XWEB_BASE) {
-      let body = null;
-      try { body = JSON.parse(await response.text()); } catch { /* not JSON; the status is the message */ }
-      const message = xWebMessage(response.status, body);
-      throw new RequestError(response.status === 429 ? 429 : 502, message);
-    }
-    if ([429, 432, 433].includes(response.status)) throw new RequestError(429, 'Web search reached a rate limit. Try later or add a free Tavily key in Settings.');
-    if (response.status === 401 || response.status === 403) throw new RequestError(502, 'The Tavily search key was rejected. Update it in Settings or clear it to use rate-limited keyless search.');
-    throw new RequestError(502, 'The web search service is unavailable. Try again or switch Search off.');
+    let body = null;
+    try { body = JSON.parse(await response.text()); } catch { /* not JSON; the status is the message */ }
+    throw new RequestError(response.status === 429 ? 429 : 502, xWebMessage(response.status, body));
   }
   let data;
   try {

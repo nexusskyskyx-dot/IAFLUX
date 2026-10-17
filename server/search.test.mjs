@@ -83,15 +83,16 @@ test('planner rejects bad upstream keys and non-chat OpenRouter routing without 
   );
 });
 
-test('Tavily search uses keyless or a personal key, rejects unsafe input, and sanitizes the returned links', async () => {
+test('search goes to x-web, rejects unsafe input, and sanitizes the returned links', async () => {
   const rawResults = {
+    object: 'search',
     results: [
-      { title: '<b>Release notes</b>', url: 'https://example.org/releases', content: '<p>Shipped today</p>', published_date: '2026-10-13T00:00:00Z' },
-      { title: 'Duplicate', url: 'https://example.org/releases', content: 'Repeat' },
-      { title: 'Bad link', url: 'javascript:alert(1)', content: 'not shown' },
-      { title: 'Local link', url: 'https://localhost/internal', content: 'not shown' },
-      { title: 'Bad credentials', url: 'https://u:p@site.test/', content: 'not shown' },
-      { title: 'Second source', url: 'https://other.example/guide', content: 'Guide' },
+      { title: '<b>Release notes</b>', url: 'https://example.org/releases', snippet: '<p>Shipped today</p>', published_date: '2026-10-13T00:00:00Z' },
+      { title: 'Duplicate', url: 'https://example.org/releases', snippet: 'Repeat' },
+      { title: 'Bad link', url: 'javascript:alert(1)', snippet: 'not shown' },
+      { title: 'Local link', url: 'https://localhost/internal', snippet: 'not shown' },
+      { title: 'Bad credentials', url: 'https://u:p@site.test/', snippet: 'not shown' },
+      { title: 'Second source', url: 'https://other.example/guide', snippet: 'Guide' },
     ],
   };
   const seen = [];
@@ -100,22 +101,20 @@ test('Tavily search uses keyless or a personal key, rejects unsafe input, and sa
     return response(rawResults);
   };
   const sources = await searchWeb('Latest release notes', '', { fetchImpl: mock });
-  assert.equal(seen[0].url, 'https://api.tavily.com/search');
-  assert.equal(seen[0].options.headers['X-Tavily-Access-Mode'], 'keyless');
-  assert.equal(seen[0].options.headers.Authorization, undefined);
-  assert.equal(JSON.parse(seen[0].options.body).search_depth, 'basic');
+  assert.equal(seen[0].url, 'https://x-web-gamma.vercel.app/api/v1/search', 'the default deployment, so search works with no configuration');
+  assert.equal(seen[0].options.headers['X-XWeb-Key'], undefined, 'and no key is invented');
+  assert.equal(JSON.parse(seen[0].options.body).multi_source, true, 'blending every configured provider');
   assert.deepEqual(sources.map((source) => source.title), ['Release notes', 'Second source']);
   assert.equal(sources[0].snippet, 'Shipped today');
   assert.equal(sources[0].publishedDate, '2026-10-13');
-  await searchWeb('New release', 'my-tavily-key', { fetchImpl: mock });
-  assert.equal(seen[1].options.headers.Authorization, 'Bearer my-tavily-key');
-  assert.equal(seen[1].options.headers['X-Tavily-Access-Mode'], undefined);
+  await searchWeb('New release', 'my-x-web-key', { fetchImpl: mock });
+  assert.equal(seen[1].options.headers['X-XWeb-Key'], 'my-x-web-key', 'a key from Settings is passed through');
   await assert.rejects(searchWeb('api_key=private', '', { fetchImpl: mock }), /safe web search query/);
   assert.equal(seen.length, 2);
   assert.deepEqual(normalizeSearchResults({ results: [] }), []);
   assert.throws(() => normalizeSearchResults({ bad: true }), /invalid response/);
   await assert.rejects(searchWeb('Something current', '', { fetchImpl: async () => response('limited', 429) }), /rate limit/);
-  await assert.rejects(searchWeb('Something current', 'bad', { fetchImpl: async () => response('denied', 401) }), /Tavily search key was rejected/);
+  await assert.rejects(searchWeb('Something current', 'bad', { fetchImpl: async () => response('denied', 401) }), /search key was rejected/);
 });
 
 test('adds bounded untrusted source data only to the last user message and instructs the model to cite it', () => {
@@ -135,35 +134,38 @@ test('adds bounded untrusted source data only to the last user message and instr
   assert.match(augmented.systemPrompt, /Cite supported current claims/);
 });
 
-test('search goes through x-web when a deployment is configured', async (t) => {
-  // One API over Tavily, Brave, Serper and Exa. The key the user already keeps
-  // in Settings is a provider key, and x-web takes exactly that — so the same
-  // key buys four indexes blended into one list instead of one provider.
+test('XWEB_BASE overrides the default deployment', async (t) => {
+  // The default hostname is a Vercel preview and can change, so operators need
+  // somewhere stable to point. This is the one thing that would break silently.
   const saved = process.env.XWEB_BASE;
   t.after(() => { if (saved === undefined) delete process.env.XWEB_BASE; else process.env.XWEB_BASE = saved; });
   process.env.XWEB_BASE = 'https://x-web.example/';
-  const module = await import(`./search.mjs?xweb=${Date.now()}`);
+  const module = await import(`./search.mjs?override=${Date.now()}`);
   const calls = [];
-  const sources = await module.searchWeb('best landing page design', 'tvly-test', {
+  await module.searchWeb('best landing page design', 'tvly-test', {
     fetchImpl: async (url, options) => {
       calls.push({ url, options });
-      return new Response(JSON.stringify({
-        object: 'search',
-        provider: 'multi',
-        results: [
-          { title: 'Zaro', url: 'https://zaro.ai/', snippet: 'AI readiness for enterprise teams.' },
-          { title: 'javascript:alert(1)', url: 'javascript:alert(1)', snippet: 'x' },
-        ],
-      }), { status: 200, headers: { 'content-type': 'application/json' } });
+      return new Response(JSON.stringify({ object: 'search', results: [{ title: 'Zaro', url: 'https://zaro.ai/', snippet: 'AI readiness.' }] }), { status: 200, headers: { 'content-type': 'application/json' } });
     },
   });
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].url, 'https://x-web.example/api/v1/search', 'the deployment, not Tavily directly');
-  assert.equal(calls[0].options.headers['X-XWeb-Key'], 'tvly-test', 'carrying the user’s existing key');
-  assert.equal(JSON.parse(calls[0].options.body).multi_source, true, 'blending every configured provider');
-  assert.equal(sources.length, 1, 'sanitized as before');
-  assert.equal(sources[0].title, 'Zaro');
-  assert.equal(sources[0].snippet, 'AI readiness for enterprise teams.', 'x-web calls the field snippet; Tavily calls it content');
+  assert.equal(calls[0].url, 'https://x-web.example/api/v1/search', 'trailing slash and all');
+  assert.equal(calls[0].options.headers['X-XWeb-Key'], 'tvly-test');
+});
+
+test('a server-side XWEB_KEY is used when nothing is entered in Settings', async (t) => {
+  const saved = process.env.XWEB_KEY;
+  t.after(() => { if (saved === undefined) delete process.env.XWEB_KEY; else process.env.XWEB_KEY = saved; });
+  process.env.XWEB_KEY = 'server-side-key';
+  const module = await import(`./search.mjs?serverkey=${Date.now()}`);
+  assert.equal(module.searchHasServerKey, true);
+  const calls = [];
+  await module.searchWeb('best landing page design', '', {
+    fetchImpl: async (url, options) => {
+      calls.push(options);
+      return new Response(JSON.stringify({ object: 'search', results: [] }), { status: 200, headers: { 'content-type': 'application/json' } });
+    },
+  });
+  assert.equal(calls[0].headers['X-XWeb-Key'], 'server-side-key', 'so search works with no key in Settings');
 });
 
 test('an x-web refusal is reported in the user\'s words', async (t) => {
@@ -179,24 +181,13 @@ test('an x-web refusal is reported in the user\'s words', async (t) => {
   await assert.rejects(fail(402, { error: { message: 'Out of credit.' } }), /out of credit/s);
 });
 
-test('the settings screen is told which backend it is configuring', async (t) => {
-  // The key box takes whatever the configured backend accepts, so the copy has
-  // to name that backend. An x-web key is not a Tavily key and saying so sends
-  // people to the wrong signup page.
-  const savedBase = process.env.XWEB_BASE;
-  const savedKey = process.env.XWEB_KEY;
-  t.after(() => {
-    for (const [name, value] of [['XWEB_BASE', savedBase], ['XWEB_KEY', savedKey]]) {
-      if (value === undefined) delete process.env[name]; else process.env[name] = value;
-    }
-  });
-  delete process.env.XWEB_BASE;
+test('the server reports whether it already holds a search key', async (t) => {
+  // "Will search work with nothing entered in Settings" is the question the
+  // Settings screen is really asking.
+  const saved = process.env.XWEB_KEY;
+  t.after(() => { if (saved === undefined) delete process.env.XWEB_KEY; else process.env.XWEB_KEY = saved; });
   delete process.env.XWEB_KEY;
-  assert.deepEqual((await import(`./search.mjs?a=${Date.now()}`)).searchBackend, { kind: 'tavily', hasServerKey: false });
-
-  process.env.XWEB_BASE = 'https://x-web.example';
-  assert.deepEqual((await import(`./search.mjs?b=${Date.now()}`)).searchBackend, { kind: 'x-web', hasServerKey: false }, 'named, whether or not a key is on the server');
-
+  assert.equal((await import(`./search.mjs?k1=${Date.now()}`)).searchHasServerKey, false);
   process.env.XWEB_KEY = 'xweb-account-key';
-  assert.deepEqual((await import(`./search.mjs?c=${Date.now()}`)).searchBackend, { kind: 'x-web', hasServerKey: true }, 'and a server key means search runs with nothing in Settings');
+  assert.equal((await import(`./search.mjs?k2=${Date.now()}`)).searchHasServerKey, true);
 });

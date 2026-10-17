@@ -116,7 +116,7 @@ test('discovery failures are reported, not swallowed', async () => {
 // End to end through the Vercel entrypoint, with the upstream mocked.
 process.env.XKIRO_API_KEY = '';
 process.env.AIFLUX_ACCESS_CODE = '';
-process.env.TAVILY_API_KEY = '';
+process.env.XWEB_KEY = '';
 const { default: chatHandler } = await import('../api/chat.js');
 
 const nativeFetch = globalThis.fetch;

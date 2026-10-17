@@ -7,7 +7,7 @@ import {
   readSSE, readLines, extractChunk, getFreeOpenRouterModels,
   getFreeXkiroModels, getXkiroFreeCatalog, xkiroCatalogIsFresh,
 } from './providers.mjs';
-import { planWebSearch, searchBackend, searchWeb, withSearchContext } from './search.mjs';
+import { planWebSearch, searchWeb, withSearchContext } from './search.mjs';
 import { createFileOpParser } from './file-ops.mjs';
 import { browse, describeBrowse, BrowseError } from './browse.mjs';
 import { isDesignRequest } from './design-profile.mjs';
@@ -16,7 +16,7 @@ import { primeDesignReferences, primingEnabled } from './design-references.mjs';
 const app = express();
 const ollamaBaseUrl = process.env.OLLAMA_BASE_URL?.trim() || '';
 const accessCode = process.env.AIFLUX_ACCESS_CODE || '';
-const envSearchKey = process.env.TAVILY_API_KEY?.trim() || '';
+const envSearchKey = process.env.XWEB_KEY?.trim() || '';
 const envKeys = {
   openrouter: process.env.OPENROUTER_API_KEY || '',
   gemini: process.env.GEMINI_API_KEY || '',
@@ -62,10 +62,7 @@ app.get('/api/config', (_req, res) => {
   res.json({
     configured: Object.fromEntries(Object.entries(envKeys).map(([provider, key]) => [provider, Boolean(key)])),
     ollamaConfigured: Boolean(ollamaBaseUrl),
-    // Works without a key in Settings either because a Tavily key is on the
-    // server or because the x-web deployment has one configured.
-    searchConfigured: Boolean(envSearchKey) || searchBackend.hasServerKey,
-    searchBackend: searchBackend.kind,
+    searchConfigured: Boolean(envSearchKey),
     requiresAccessCode: Boolean(accessCode),
   });
 });

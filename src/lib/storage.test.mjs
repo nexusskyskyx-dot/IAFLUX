@@ -43,7 +43,7 @@ test('migrates saved random/safety models while retaining named free chat select
   }
 });
 
-test('web search preference and Tavily key persist with existing session/remember settings', async () => {
+test('web search preference and search key persist with existing session/remember settings', async () => {
   const vite = await createServer({
     configFile: false, appType: 'custom', optimizeDeps: { noDiscovery: true, include: [] },
     server: { middlewareMode: true },
@@ -69,14 +69,14 @@ test('web search preference and Tavily key persist with existing session/remembe
     assert.equal(loadSearchMode(), 'always');
     local.set('aiflux.search-mode.v1', 'invalid');
     assert.equal(loadSearchMode(), 'off');
-    const credentials = { keys: { openrouter: '', gemini: 'ai-key', groq: '' }, searchKey: 'tavily-key', accessCode: '', remember: false };
+    const credentials = { keys: { openrouter: '', gemini: 'ai-key', groq: '' }, searchKey: 'x-web-key', accessCode: '', remember: false };
     saveCredentials(credentials);
     assert.equal(local.has('aiflux.credentials.v1'), false);
-    assert.equal(loadCredentials().searchKey, 'tavily-key');
+    assert.equal(loadCredentials().searchKey, 'x-web-key');
     saveCredentials({ ...credentials, remember: true });
     assert.equal(session.has('aiflux.credentials.v1'), false);
     assert.equal(local.has('aiflux.credentials.v1'), true);
-    assert.equal(loadCredentials().searchKey, 'tavily-key');
+    assert.equal(loadCredentials().searchKey, 'x-web-key');
     local.set('aiflux.credentials.v1', JSON.stringify({ keys: credentials.keys, remember: true }));
     assert.equal(loadCredentials().searchKey, ''); // Legacy saved settings still work.
   } finally {

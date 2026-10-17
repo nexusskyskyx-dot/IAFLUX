@@ -69,10 +69,10 @@ test('settings explain optional keyless search and offer a private key field', a
     const config = { configured: { openrouter: false, gemini: false, groq: false }, ollamaConfigured: false, searchConfigured: false, requiresAccessCode: false };
     const html = renderToStaticMarkup(React.createElement(SettingsModal, { credentials, config, onSave() {}, onClose() {} }));
     assert.match(html, /LIVE WEB SEARCH/);
-    assert.match(html, /Keyless available/);
-    assert.match(html, /Optional Tavily API key/);
+    assert.match(html, /Key required/, 'x-web has no keyless mode, so an absent key is called what it is');
+    assert.match(html, /x-web key, or a Tavily \/ Brave \/ Serper \/ Exa key/);
     assert.match(html, /type="password"[^>]*aria-label="Web search API key"/);
-    assert.match(html, /query goes to Tavily/);
+    assert.match(html, /query goes to the x-web search backend/);
     // This block sits below four provider blocks in a modal capped at 780px, so
     // it has always been past the fold. The modal now says there is more.
     assert.match(html, /Scroll for web search/, 'a cue that something is below the fold');
@@ -80,7 +80,7 @@ test('settings explain optional keyless search and offer a private key field', a
   } finally { await vite.close(); }
 });
 
-test('settings name x-web when that is the backend the workspace is using', async () => {
+test('settings describe the x-web dashboard flow', async () => {
   // The box takes whatever key the configured backend accepts. An x-web key is
   // not a Tavily key, and telling someone it is sends them to the wrong signup
   // page to get one.
@@ -88,7 +88,7 @@ test('settings name x-web when that is the backend the workspace is using', asyn
   try {
     const { default: SettingsModal } = await vite.ssrLoadModule('/src/components/SettingsModal.tsx');
     const credentials = { keys: { openrouter: '', gemini: 'model-key', groq: '' }, accessCode: '', searchKey: '', remember: false };
-    const config = { configured: { openrouter: false, gemini: false, groq: false }, ollamaConfigured: false, searchConfigured: false, searchBackend: 'x-web', requiresAccessCode: false };
+    const config = { configured: { openrouter: false, gemini: false, groq: false }, ollamaConfigured: false, searchConfigured: false, requiresAccessCode: false };
     const html = renderToStaticMarkup(React.createElement(SettingsModal, { credentials, config, onSave() {}, onClose() {} }));
     assert.match(html, /x-web search/);
     assert.match(html, /one key reaches Tavily, Brave Search, Serper and Exa/, 'saying what one key actually buys');
@@ -96,7 +96,7 @@ test('settings name x-web when that is the backend the workspace is using', asyn
     assert.match(html, /searches with the provider key you saved there/, 'describing the dashboard flow, which is the easy path');
     assert.match(html, /Get an x-web key/, 'linking to the right signup');
     assert.match(html, /query goes to the x-web search backend/);
-    assert.doesNotMatch(html, /Optional Tavily API key/, 'without the old Tavily-only copy');
+    assert.doesNotMatch(html, /Keyless available/, 'there is no keyless mode to promise');
   } finally { await vite.close(); }
 });
 

@@ -40,7 +40,7 @@ test('client forwards web preference and optional search key, then reads interle
   } finally { globalThis.fetch = originalFetch; }
 });
 
-test('search off does not transmit the stored Tavily key', async () => {
+test('search off does not transmit the stored search key', async () => {
   const originalFetch = globalThis.fetch;
   let headers;
   globalThis.fetch = async (_url, options) => {

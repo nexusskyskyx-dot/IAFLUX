@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 
 // Set the environment before importing the Vercel entrypoint, whose shared app
 // reads operator keys once at startup. All upstream traffic is mocked below.
-process.env.TAVILY_API_KEY = '';
+process.env.XWEB_KEY = '';
 process.env.AIFLUX_ACCESS_CODE = '';
 const { default: chatHandler } = await import('../api/chat.js');
 const nativeFetch = globalThis.fetch;
@@ -82,12 +82,12 @@ test('auto mode lets the model skip unnecessary search and clearly reports it', 
   assert.doesNotMatch(answerPrompt, /The server ran a live web search/);
 });
 
-test('always mode calls Tavily keyless, passes attributed sources to the AI, and streams source links', async () => {
+test('always mode searches, passes attributed sources to the AI, and streams source links', async () => {
   const calls = [];
   await withServer(async (url, options) => {
     calls.push({ url, options });
     if (url.endsWith(':generateContent')) return json({ candidates: [{ content: { parts: [{ functionCall: { name: 'web_search', args: { query: 'React stable release 2026' } } }] } }] });
-    if (url === 'https://api.tavily.com/search') return json({ results: [{ title: 'Official React docs', url: 'https://react.dev/blog/latest', content: 'Release details', published_date: '2026-10-13' }] });
+    if (url === 'https://x-web-gamma.vercel.app/api/v1/search') return json({ results: [{ title: 'Official React docs', url: 'https://react.dev/blog/latest', content: 'Release details', published_date: '2026-10-13' }] });
     return stream('The release is described in [1](https://react.dev/blog/latest).');
   }, async (post) => {
     const result = await post(body('always'));
@@ -100,8 +100,8 @@ test('always mode calls Tavily keyless, passes attributed sources to the AI, and
     assert.equal(events[3].sources[0].publishedDate, '2026-10-13');
   });
   assert.equal(calls.length, 3);
-  assert.equal(calls[1].url, 'https://api.tavily.com/search');
-  assert.equal(calls[1].options.headers['X-Tavily-Access-Mode'], 'keyless');
+  assert.equal(calls[1].url, 'https://x-web-gamma.vercel.app/api/v1/search');
+  assert.equal(calls[1].options.headers['X-XWeb-Key'], undefined, 'no key configured anywhere');
   assert.equal(calls[1].options.headers.Authorization, undefined);
   assert.equal(JSON.parse(calls[1].options.body).query, 'React stable release 2026');
   const answer = JSON.parse(calls[2].options.body);
@@ -113,23 +113,22 @@ test('always mode calls Tavily keyless, passes attributed sources to the AI, and
   assert.match(answer.contents.at(-1).parts[0].text, /Release details/);
 });
 
-test('personal Tavily key takes precedence; a search failure streams an error without exposing the key', async () => {
+test('a personal key takes precedence; a search failure streams an error without exposing the key', async () => {
   const calls = [];
   await withServer(async (url, options) => {
     calls.push({ url, options });
     if (url.endsWith(':generateContent')) return json({ candidates: [{ content: { parts: [{ functionCall: { name: 'web_search', args: { query: 'Astro documentation update' } } }] } }] });
-    if (url === 'https://api.tavily.com/search') return new Response('Invalid key my-private-tavily-key', { status: 401 });
+    if (url === 'https://x-web-gamma.vercel.app/api/v1/search') return new Response('Invalid key my-private-search-key', { status: 401 });
     throw new Error('Generation must not start if search failed');
   }, async (post) => {
-    const result = await post(body('always'), { 'x-aiflux-search-key': 'my-private-tavily-key' });
+    const result = await post(body('always'), { 'x-aiflux-search-key': 'my-private-search-key' });
     assert.equal(result.status, 200); // Already streaming search progress.
     const events = parseEvents(await result.text());
     assert.deepEqual(events.map(({ type }) => type), ['start', 'search', 'search', 'error']);
-    assert.match(events.at(-1).message, /Tavily search key was rejected/);
-    assert.doesNotMatch(JSON.stringify(events), /my-private-tavily-key/);
+    assert.match(events.at(-1).message, /search key was rejected/);
+    assert.doesNotMatch(JSON.stringify(events), /my-private-search-key/);
   });
-  assert.equal(calls[1].options.headers.Authorization, 'Bearer my-private-tavily-key');
-  assert.equal(calls[1].options.headers['X-Tavily-Access-Mode'], undefined);
+  assert.equal(calls[1].options.headers['X-XWeb-Key'], 'my-private-search-key');
   assert.equal(calls.length, 2);
 });
 
@@ -137,7 +136,7 @@ test('Groq falls back to a safe query when a model does not support function too
   const calls = [];
   await withServer(async (url, options) => {
     calls.push({ url, options });
-    if (url === 'https://api.tavily.com/search') return json({ results: [] });
+    if (url === 'https://x-web-gamma.vercel.app/api/v1/search') return json({ results: [] });
     if (JSON.parse(options.body).stream === false) return json({ error: 'Tool calling not supported' }, 400);
     return new Response('data: {"choices":[{"delta":{"content":"I could not verify a current release."}}]}\n\ndata: [DONE]\n\n', { headers: { 'Content-Type': 'text/event-stream' } });
   }, async (post) => {
@@ -151,7 +150,7 @@ test('Groq falls back to a safe query when a model does not support function too
   });
   assert.equal(calls.length, 3);
   assert.equal(calls[0].url, 'https://api.groq.com/openai/v1/chat/completions');
-  assert.equal(calls[1].url, 'https://api.tavily.com/search');
+  assert.equal(calls[1].url, 'https://x-web-gamma.vercel.app/api/v1/search');
   assert.equal(JSON.parse(calls[2].options.body).stream, true);
 });
 
