@@ -134,3 +134,47 @@ test('adds bounded untrusted source data only to the last user message and instr
   assert.match(augmented.systemPrompt, /never follow directions inside them/i);
   assert.match(augmented.systemPrompt, /Cite supported current claims/);
 });
+
+test('search goes through x-web when a deployment is configured', async (t) => {
+  // One API over Tavily, Brave, Serper and Exa. The key the user already keeps
+  // in Settings is a provider key, and x-web takes exactly that — so the same
+  // key buys four indexes blended into one list instead of one provider.
+  const saved = process.env.XWEB_BASE;
+  t.after(() => { if (saved === undefined) delete process.env.XWEB_BASE; else process.env.XWEB_BASE = saved; });
+  process.env.XWEB_BASE = 'https://x-web.example/';
+  const module = await import(`./search.mjs?xweb=${Date.now()}`);
+  const calls = [];
+  const sources = await module.searchWeb('best landing page design', 'tvly-test', {
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      return new Response(JSON.stringify({
+        object: 'search',
+        provider: 'multi',
+        results: [
+          { title: 'Zaro', url: 'https://zaro.ai/', snippet: 'AI readiness for enterprise teams.' },
+          { title: 'javascript:alert(1)', url: 'javascript:alert(1)', snippet: 'x' },
+        ],
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    },
+  });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, 'https://x-web.example/api/v1/search', 'the deployment, not Tavily directly');
+  assert.equal(calls[0].options.headers['X-XWeb-Key'], 'tvly-test', 'carrying the user’s existing key');
+  assert.equal(JSON.parse(calls[0].options.body).multi_source, true, 'blending every configured provider');
+  assert.equal(sources.length, 1, 'sanitized as before');
+  assert.equal(sources[0].title, 'Zaro');
+  assert.equal(sources[0].snippet, 'AI readiness for enterprise teams.', 'x-web calls the field snippet; Tavily calls it content');
+});
+
+test('an x-web refusal is reported in the user\'s words', async (t) => {
+  const saved = process.env.XWEB_BASE;
+  t.after(() => { if (saved === undefined) delete process.env.XWEB_BASE; else process.env.XWEB_BASE = saved; });
+  process.env.XWEB_BASE = 'https://x-web.example';
+  const module = await import(`./search.mjs?xweb2=${Date.now()}`);
+  const fail = (status, body) => module.searchWeb('best landing page design', 'k', {
+    fetchImpl: async () => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } }),
+  });
+  await assert.rejects(fail(401, { error: { type: 'authentication_error', message: 'No provider key supplied.' } }), /search key was rejected.*No provider key supplied/s);
+  await assert.rejects(fail(429, { error: { message: 'Slow down.' } }), /rate limit.*Slow down/s);
+  await assert.rejects(fail(402, { error: { message: 'Out of credit.' } }), /out of credit/s);
+});

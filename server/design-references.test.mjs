@@ -1,7 +1,7 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  primeDesignReferences, galleryUrlFor, godlyUrlFor, galleryCandidatesFor,
+  primeDesignReferences, galleryUrlFor, godlyUrlFor, galleryCandidatesFor, designSearchQuery,
   primingEnabled, clearReferenceCache, PRIME_BUDGET_MS,
 } from './design-references.mjs';
 
@@ -261,4 +261,72 @@ test('the galleries are tried in order, without repeating one', () => {
   assert.equal(new Set(candidates).size, candidates.length, 'and none twice');
   // A request Godly answers with a section page should not lose that answer.
   assert.ok(galleryCandidatesFor('a hero section').includes('https://godly.design/hero'));
+});
+
+test('a request names the kind of page to search for, not the raw sentence', () => {
+  // Asked for a landing page for Docox, the thing to look up is "landing page"
+  // — the sentence as typed is mostly a product name no index has heard of.
+  assert.equal(designSearchQuery('make me a landing page for Docox'), 'landing page design inspiration');
+  assert.equal(designSearchQuery('I need a pricing page'), 'pricing page design inspiration');
+  assert.equal(designSearchQuery('design a hero section'), 'hero section design inspiration');
+  assert.equal(designSearchQuery('a footer'), 'footer design inspiration');
+  assert.equal(designSearchQuery('a call to action'), 'call to action design inspiration');
+  assert.equal(designSearchQuery('something vague'), 'landing page design inspiration');
+});
+
+test('when every gallery refuses, the request is searched for instead', async () => {
+  // The galleries answer our own requests with 403. A search index answers over
+  // an API from another address, so it has no reason to turn us away.
+  const queries = [];
+  const entry = await primeDesignReferences('make me a landing page for Docox', {
+    browseImpl: async (url) => (url === 'https://zaro.ai/'
+      ? siteResult(url, 'Zaro')
+      : { ok: false, url, error: 'refused' }),
+    searchImpl: async (query) => {
+      queries.push(query);
+      return [
+        { title: 'Zaro', url: 'https://zaro.ai/', snippet: 'AI readiness.' },
+        { title: 'Clay', url: 'https://clay.com/', snippet: 'Revenue.' },
+        { title: 'Blocked too', url: 'https://www.flex.one/', snippet: 'Cash back.' },
+      ];
+    },
+  });
+  assert.equal(queries.length, 1, 'searched once, not once per gallery');
+  assert.equal(queries[0], 'landing page design inspiration');
+  // Anything search turned up is opened the same way, and this one answered.
+  assert.ok(entry.results.some((r) => r.ok && r.url === 'https://zaro.ai/'), 'a search hit was opened');
+  assert.ok(entry.results.length > 3, 'the refusals are still reported');
+  assert.match(entry.note, /Zaro — https:\/\/zaro\.ai\//, 'and every hit is named');
+  assert.match(entry.note, /AI readiness\./, 'with its snippet');
+});
+
+test('search is not spent on a request the galleries already answered', async () => {
+  let searches = 0;
+  await primeDesignReferences('make me a landing page', {
+    browseImpl: async (url) => galleryResult(url, []),
+    searchImpl: async () => { searches += 1; return []; },
+  });
+  assert.equal(searches, 0, 'it costs a search call, so it is not spent freely');
+});
+
+test('nothing opens at all, and the search hits alone still reach the model', async () => {
+  // The point of searching: even with every fetch refused, the model is told
+  // what exists instead of being told nothing.
+  const entry = await primeDesignReferences('make me a landing page', {
+    browseImpl: async (url) => ({ ok: false, url, error: 'refused' }),
+    searchImpl: async () => [{ title: 'Clay', url: 'https://clay.com/', snippet: 'Build systems to grow revenue.' }],
+  });
+  assert.match(entry.note, /FOUND FOR THIS REQUEST/, 'and it says these were found, not read');
+  assert.match(entry.note, /Clay — https:\/\/clay\.com\//);
+  assert.match(entry.note, /as leads, not as facts/, 'without pretending they were verified');
+  assert.ok(entry.results.every((r) => !r.ok), 'while the failures stay visible');
+});
+
+test('a search that will not run does not stop the answer', async () => {
+  const entry = await primeDesignReferences('make me a landing page', {
+    browseImpl: async (url) => ({ ok: false, url, error: 'refused' }),
+    searchImpl: async () => { throw new Error('no key'); },
+  });
+  assert.equal(entry.note, '', 'and degrades to no note, as before');
+  assert.equal(entry.results.length, 3, 'with every gallery attempt reported');
 });

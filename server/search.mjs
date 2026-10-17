@@ -3,6 +3,30 @@ import { buildAssistantPrompt } from './assistant-profile.mjs';
 import { isNonChatModelId } from '../src/lib/model-policy.mjs';
 
 const SEARCH_URL = 'https://api.tavily.com/search';
+
+/**
+ * x-web: one search API over Tavily, Brave Search, Serper and Exa.
+ *
+ * Set XWEB_BASE to a deployment (see github.com/nexusskyskyx-dot/x-web) and
+ * searches go through it instead of straight to one provider. The key the user
+ * already keeps in Settings is a provider key, and x-web takes exactly that in
+ * X-XWeb-Key, so nothing has to be re-plumbed: the same key buys four indexes
+ * and a blended, deduplicated result set instead of one.
+ *
+ * XWEB_KEY is for a deployment where the provider key lives on the server, or
+ * for an x-web account key, so a search can run with nothing in Settings.
+ */
+const XWEB_BASE = (process.env.XWEB_BASE || '').replace(/\/$/, '');
+const XWEB_KEY = process.env.XWEB_KEY || '';
+
+/** The x-web error envelope, so a refusal can be reported in the user's words. */
+function xWebMessage(status, body) {
+  const detail = body?.error?.message ? ` ${body.error.message}` : '';
+  if (status === 401 || status === 403) return `The search key was rejected.${detail} Update it in Settings or clear it.`;
+  if (status === 429) return `Web search reached a rate limit.${detail} Try later.`;
+  if (status === 402) return `The search provider is out of credit.${detail}`;
+  return `The web search service is unavailable.${detail}`;
+}
 const TOOL_DESCRIPTION = 'Search the live web for current information, official documentation, releases, or recent events. Use a short, general query without private code, credentials, or personal details.';
 const TOOL = {
   type: 'function',
@@ -135,7 +159,7 @@ export function normalizeSearchResults(data) {
     const url = safeSourceUrl(item?.url);
     if (!url || seen.has(url)) continue;
     const title = cleanText(item.title, 140) || new URL(url).hostname;
-    const snippet = cleanText(item.content, 500);
+    const snippet = cleanText(item.content ?? item.snippet, 500);
     const date = typeof item.published_date === 'string' ? new Date(item.published_date) : null;
     seen.add(url);
     sources.push({ title, url, snippet, ...(date && !Number.isNaN(date.valueOf()) ? { publishedDate: date.toISOString().slice(0, 10) } : {}) });
@@ -147,21 +171,44 @@ export function normalizeSearchResults(data) {
 export async function searchWeb(query, key = '', { signal, fetchImpl = fetch } = {}) {
   const safeQuery = normalizeSearchQuery(query);
   if (!safeQuery) throw new RequestError(400, 'Could not form a safe web search query. Remove secrets or private details and try again.');
+  const timeout = AbortSignal.any([AbortSignal.timeout(12_000), ...(signal ? [signal] : [])]);
   let response;
   try {
-    response = await fetchImpl(SEARCH_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...(key ? { Authorization: `Bearer ${key}` } : { 'X-Tavily-Access-Mode': 'keyless' }) },
-      body: JSON.stringify({ query: safeQuery, search_depth: 'basic', max_results: 5, include_answer: false, include_raw_content: false, include_images: false, include_published_date: true, safe_search: true }),
-      signal: AbortSignal.any([AbortSignal.timeout(12_000), ...(signal ? [signal] : [])]),
-    });
+    response = XWEB_BASE
+      ? await fetchImpl(`${XWEB_BASE}/api/v1/search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(key || XWEB_KEY ? { 'X-XWeb-Key': key || XWEB_KEY } : {}) },
+        body: JSON.stringify({
+          query: safeQuery,
+          max_results: 5,
+          include_answer: false,
+          // The reason to use it at all: every configured provider is queried
+          // at once, then deduplicated and reranked into one list.
+          multi_source: true,
+        }),
+        signal: timeout,
+      })
+      : await fetchImpl(SEARCH_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(key ? { Authorization: `Bearer ${key}` } : { 'X-Tavily-Access-Mode': 'keyless' }) },
+        body: JSON.stringify({ query: safeQuery, search_depth: 'basic', max_results: 5, include_answer: false, include_raw_content: false, include_images: false, include_published_date: true, safe_search: true }),
+        signal: timeout,
+      });
   } catch (error) {
     if (signal?.aborted) throw error;
     throw new RequestError(502, 'Live web search is unavailable. Try again or switch Search off.');
   }
-  if ([429, 432, 433].includes(response.status)) throw new RequestError(429, 'Web search reached a rate limit. Try later or add a free Tavily key in Settings.');
-  if (response.status === 401 || response.status === 403) throw new RequestError(502, 'The Tavily search key was rejected. Update it in Settings or clear it to use rate-limited keyless search.');
-  if (!response.ok) throw new RequestError(502, 'The web search service is unavailable. Try again or switch Search off.');
+  if (!response.ok) {
+    if (XWEB_BASE) {
+      let body = null;
+      try { body = JSON.parse(await response.text()); } catch { /* not JSON; the status is the message */ }
+      const message = xWebMessage(response.status, body);
+      throw new RequestError(response.status === 429 ? 429 : 502, message);
+    }
+    if ([429, 432, 433].includes(response.status)) throw new RequestError(429, 'Web search reached a rate limit. Try later or add a free Tavily key in Settings.');
+    if (response.status === 401 || response.status === 403) throw new RequestError(502, 'The Tavily search key was rejected. Update it in Settings or clear it to use rate-limited keyless search.');
+    throw new RequestError(502, 'The web search service is unavailable. Try again or switch Search off.');
+  }
   let data;
   try {
     const text = await response.text();

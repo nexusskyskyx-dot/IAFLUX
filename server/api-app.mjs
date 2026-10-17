@@ -203,7 +203,12 @@ app.post('/api/chat', rateLimit, async (req, res) => {
     // whether or not web search is also running for this message.
     if (primingEnabled() && isDesignRequest(newestUserMessage?.content) && !controller.signal.aborted) {
       try {
-        primed = await primeDesignReferences(newestUserMessage.content);
+        primed = await primeDesignReferences(newestUserMessage.content, {
+          // Only asked for when every gallery has refused. It costs a search
+          // call, which is not free, so it is not spent on a request the
+          // galleries answered.
+          searchImpl: (query) => searchWeb(query, suppliedSearchKey || envSearchKey, { signal: controller.signal }),
+        });
       } catch {
         primed = null; // never let a reference fetch break an answer
       }
